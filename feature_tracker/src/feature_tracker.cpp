@@ -2,15 +2,15 @@
 
 int FeatureTracker::n_id = 0;
 
-bool inBorder(const cv::Point2f &pt)
+bool inBorder(const cv::Point2f &pt)  // 判断点是否在图片内
 {
     const int BORDER_SIZE = 1;
-    int img_x = cvRound(pt.x);
+    int img_x = cvRound(pt.x);  // 四舍五如返回整形
     int img_y = cvRound(pt.y);
     return BORDER_SIZE <= img_x && img_x < COL - BORDER_SIZE && BORDER_SIZE <= img_y && img_y < ROW - BORDER_SIZE;
 }
 
-void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)
+void reduceVector(vector<cv::Point2f> &v, vector<uchar> status)  // 根据经过处理的点的状态对点进行删减，若该点状态值为0则舍去
 {
     int j = 0;
     for (int i = 0; i < int(v.size()); i++)
@@ -111,6 +111,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         vector<uchar> status;
         vector<float> err;
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
+        // calcOpticalFlowPyrLK() OpenCV的光流追踪函数,提供前后两张图片以及对应的特征点，即可得到追踪后的点
 
         for (int i = 0; i < int(forw_pts.size()); i++)  // 将位于图像边界外的点标记为0
             if (status[i] && !inBorder(forw_pts[i]))

@@ -18,7 +18,7 @@ queue<sensor_msgs::ImageConstPtr> img_buf;
 ros::Publisher pub_img,pub_match;
 ros::Publisher pub_restart;
 
-FeatureTracker trackerData[NUM_OF_CAM];  // 它存储着当前时刻所有相关的数据，内部数据的生命周期仅限当前循环，如果当前的一个循环过去了，里面的数据是下一时刻的了
+FeatureTracker trackerData[NUM_OF_CAM];  // 存储当前时刻所有相关的数据
 double first_image_time;  // 每隔delta_t = 1/FREQ 时间的帧对应的时间戳;FREQ:发布特征点的频率
 int pub_count = 1;  // 每隔delta_t = 1/FREQ 时间内连续(没有中断/没有报错)发布的帧数
 bool first_image_flag = true;  // 0:当前是第一帧  1:当前不是第一帧
@@ -28,7 +28,7 @@ bool init_pub = 0;  // 0:第一帧不把特征发布到buf里    1:发布到buf�
 
 // 该函数是ROS的回调函数，主要功能包括：readImage()函数对新来的图像使用光流法进行特征点跟踪，
 // 并将追踪的特征点封装成feature_points发布到pub_img的话题下，将图像封装成ptr发布在pub_match下
-void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
+void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
 {
     if(first_image_flag)  // 对于第一帧图像，只记录对应时间戳，不提取特征，因为他没有前一帧图像，无法获取光流
     {
@@ -220,15 +220,15 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "feature_tracker");
+    ros::init(argc, argv, "feature_tracker");  // 配置ros的初始化和句柄
     ros::NodeHandle n("~");
     ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
-    readParameters(n);
+    readParameters(n);  // 读取参数，config->euroc->euroc_config.yaml中的一些配置参数
 
     for (int i = 0; i < NUM_OF_CAM; i++)
-        trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);
+        trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);  // 读取相机内参
 
-    if(FISHEYE)
+    if(FISHEYE)  // 判断是否加入鱼眼mask来去除边缘噪声
     {
         for (int i = 0; i < NUM_OF_CAM; i++)
         {
@@ -243,6 +243,7 @@ int main(int argc, char **argv)
         }
     }
 
+    // 订阅话题和发布话题，监听IMAGE_TOPIC（/cam0/image_raw），有图像发布到这个话题上的时候，执行回调函数，这里直接进入到img_callback函数中接收图像
     ros::Subscriber sub_img = n.subscribe(IMAGE_TOPIC, 100, img_callback);
 
     pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
