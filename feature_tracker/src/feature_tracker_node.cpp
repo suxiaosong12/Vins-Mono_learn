@@ -111,9 +111,9 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
 #endif
     }
 
-    for (unsigned int i = 0;; i++)
+    for (unsigned int i = 0;; i++)  // 更新全局ID
     {
-        bool completed = false;
+        bool completed = false;  // completed如果是true，说明没有更新完id，则持续循环，如果是false，说明更新完了则跳出循环
         for (int j = 0; j < NUM_OF_CAM; j++)
             if (j != 1 || !STEREO_TRACK)
                 completed |= trackerData[j].updateID(i);
@@ -121,13 +121,14 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
             break;
     }
 
-   if (PUB_THIS_FRAME)
+   // 特征点的发布
+   if (PUB_THIS_FRAME)  // 如果PUB_THIS_FRAME=1则进行发布
    {
         pub_count++;
-        sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);
+        sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);  // 归一化坐标
         sensor_msgs::ChannelFloat32 id_of_point;
-        sensor_msgs::ChannelFloat32 u_of_point;
-        sensor_msgs::ChannelFloat32 v_of_point;
+        sensor_msgs::ChannelFloat32 u_of_point;  // 像素坐标x
+        sensor_msgs::ChannelFloat32 v_of_point;  // 像素坐标y
         sensor_msgs::ChannelFloat32 velocity_x_of_point;
         sensor_msgs::ChannelFloat32 velocity_y_of_point;
 
@@ -137,37 +138,39 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         vector<set<int>> hash_ids(NUM_OF_CAM);
         for (int i = 0; i < NUM_OF_CAM; i++)
         {
-            auto &un_pts = trackerData[i].cur_un_pts;
-            auto &cur_pts = trackerData[i].cur_pts;
+            auto &un_pts = trackerData[i].cur_un_pts;  // 归一化坐标
+            auto &cur_pts = trackerData[i].cur_pts;  // 像素坐标
             auto &ids = trackerData[i].ids;
             auto &pts_velocity = trackerData[i].pts_velocity;
             for (unsigned int j = 0; j < ids.size(); j++)
             {
-                if (trackerData[i].track_cnt[j] > 1)
+                if (trackerData[i].track_cnt[j] > 1)  // 只发布追踪次数大于1的特征点
                 {
                     int p_id = ids[j];
                     hash_ids[i].insert(p_id);
-                    geometry_msgs::Point32 p;
+                    geometry_msgs::Point32 p;  // 归一化坐标
                     p.x = un_pts[j].x;
                     p.y = un_pts[j].y;
                     p.z = 1;
 
-                    feature_points->points.push_back(p);
+                    feature_points->points.push_back(p);  // 归一化坐标
                     id_of_point.values.push_back(p_id * NUM_OF_CAM + i);
-                    u_of_point.values.push_back(cur_pts[j].x);
-                    v_of_point.values.push_back(cur_pts[j].y);
+                    u_of_point.values.push_back(cur_pts[j].x);  // 像素坐标
+                    v_of_point.values.push_back(cur_pts[j].y);  // 像素坐标
                     velocity_x_of_point.values.push_back(pts_velocity[j].x);
                     velocity_y_of_point.values.push_back(pts_velocity[j].y);
                 }
-            }
-        }
+            }  // 将特征点id，矫正后归一化平面的3D点(x,y,z=1)，像素2D点(u,v)，像素的速度(vx,vy)，
+        }      // 封装成sensor_msgs::PointCloudPtr类型的feature_points实例中,发布到pub_img
         feature_points->channels.push_back(id_of_point);
         feature_points->channels.push_back(u_of_point);
         feature_points->channels.push_back(v_of_point);
         feature_points->channels.push_back(velocity_x_of_point);
         feature_points->channels.push_back(velocity_y_of_point);
         ROS_DEBUG("publish %f, at %f", feature_points->header.stamp.toSec(), ros::Time::now().toSec());
+
         // skip the first image; since no optical speed on frist image
+        // 如果是第一帧的话，不发布数据
         if (!init_pub)
         {
             init_pub = 1;
@@ -175,6 +178,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)
         else
             pub_img.publish(feature_points);
 
+        // 将图像封装到cv_bridge::cvtColor类型的ptr实例中发布到pub_match
         if (SHOW_TRACK)
         {
             ptr = cv_bridge::cvtColor(ptr, sensor_msgs::image_encodings::BGR8);

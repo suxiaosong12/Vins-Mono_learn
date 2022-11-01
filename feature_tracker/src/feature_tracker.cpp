@@ -216,7 +216,7 @@ bool FeatureTracker::updateID(unsigned int i)
         return true;
     }
     else
-        return false;
+        return false;  // means all the pts are identified
 }
 
 void FeatureTracker::readIntrinsicParameter(const string &calib_file)
@@ -271,6 +271,7 @@ void FeatureTracker::undistortedPoints()
         Eigen::Vector2d a(cur_pts[i].x, cur_pts[i].y);
         Eigen::Vector3d b;
         m_camera->liftProjective(a, b);
+        // 获取cur帧下的归一化坐标和它与id的hash(这个hash唯一的用途也在这个函数里)
         cur_un_pts.push_back(cv::Point2f(b.x() / b.z(), b.y() / b.z()));
         cur_un_pts_map.insert(make_pair(ids[i], cv::Point2f(b.x() / b.z(), b.y() / b.z())));
         //printf("cur pts id %d %f %f", ids[i], cur_un_pts[i].x, cur_un_pts[i].y);
