@@ -83,17 +83,17 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     TicToc t_r;
     cur_time = _cur_time;
 
-    if (EQUALIZE)  // 判断是否对图像进行自适应直方图均衡化
+    if (EQUALIZE)  // 如果图像过亮或者过暗，进行直方图均衡化，提升对比度，方便提取角点
     {
         cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(3.0, cv::Size(8, 8));  // 对图像进行自适应直方图均衡化
         TicToc t_c;
-        clahe->apply(_img, img);
+        clahe->apply(_img, img);  // apply(InputArray src, OutputArray dst)
         ROS_DEBUG("CLAHE costs: %fms", t_c.toc());
     }
     else
         img = _img;
 
-    // 首帧判断和对的forw_img更新
+    // 首帧判断和对forw_img更新
     if (forw_img.empty())  // 如果当前帧的图像数据forw_img为空，说明当前是第一次读入图像数据
     {
         prev_img = cur_img = forw_img = img;
@@ -105,23 +105,25 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 
     forw_pts.clear();  // 光流追踪和失败点剔除
 
-    if (cur_pts.size() > 0)  // 通过inBorder(),status()来定位到outlier的位置，然后把status[i]==0的点统统剔除
+    if (cur_pts.size() > 0)  //上一帧有特征点，就可以进行光流追踪了
     {
         TicToc t_o;
         vector<uchar> status;
         vector<float> err;
+        // 调用opencv函数进行光流追踪
+        // Step 1 通过opencv光流追踪给的状态位剔除outlier
         cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
-        // calcOpticalFlowPyrLK() OpenCV的光流追踪函数,提供前后两张图片以及对应的特征点，即可得到追踪后的点
-
+        // calcOpticalFlowPyrLK() OpenCV的光流追踪函数,提供前后两张图片以及对应的特征点，即可得到追踪后的点，以及各点的状态、误差
+        // Step 2 通过图像边界剔除outlier
         for (int i = 0; i < int(forw_pts.size()); i++)  // 将位于图像边界外的点标记为0
-            if (status[i] && !inBorder(forw_pts[i]))
+            if (status[i] && !inBorder(forw_pts[i]))  // 追踪状态好检查在不在图像范围
                 status[i] = 0;
-        reduceVector(prev_pts, status);
+        reduceVector(prev_pts, status);  // 没用到
         reduceVector(cur_pts, status);
         reduceVector(forw_pts, status);
-        reduceVector(ids, status);
-        reduceVector(cur_un_pts, status);
-        reduceVector(track_cnt, status);
+        reduceVector(ids, status);  // 特征点的id
+        reduceVector(cur_un_pts, status);  // 去畸变后的坐标
+        reduceVector(track_cnt, status);   // 追踪次数
         ROS_DEBUG("temporal optical flow costs: %fms", t_o.toc());
     }
     // 更新当前特征点被追踪到的次数
@@ -220,10 +222,11 @@ bool FeatureTracker::updateID(unsigned int i)
         return false;  // means all the pts are identified
 }
 
-void FeatureTracker::readIntrinsicParameter(const string &calib_file)
-{
+void FeatureTracker::readIntrinsicParameter(const string &calib_file)  // 读取相机内参
+{   // 读到的相机内参赋给m_camera
     ROS_INFO("reading paramerter of camera %s", calib_file.c_str());
     m_camera = CameraFactory::instance()->generateCameraFromYamlFile(calib_file);
+    // generateCameraFromYamlFile通过配置文件读取相机的模型（一般为针孔相机模型，根据不同相机类型生成不同camera对象
 }
 
 void FeatureTracker::showUndistortion(const string &name)

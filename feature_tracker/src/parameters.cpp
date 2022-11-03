@@ -22,7 +22,7 @@ template <typename T>
 T readParam(ros::NodeHandle &n, std::string name)
 {
     T ans;
-    if (n.getParam(name, ans))
+    if (n.getParam(name, ans))  // Ros自带的getParam获取配置文件地址
     {
         ROS_INFO_STREAM("Loaded " << name << ": " << ans);
     }
@@ -37,15 +37,15 @@ T readParam(ros::NodeHandle &n, std::string name)
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;
-    config_file = readParam<std::string>(n, "config_file");
-    cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
+    config_file = readParam<std::string>(n, "config_file");  // 从launch文件获取config_file地址
+    cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);  // FileStorage::READ 打开文件进行读操作，读取配置文件
     if(!fsSettings.isOpened())
     {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
     }
-    std::string VINS_FOLDER_PATH = readParam<std::string>(n, "vins_folder");
+    std::string VINS_FOLDER_PATH = readParam<std::string>(n, "vins_folder");  // 用readParam函数从launch读取vins_folder地址
 
-    fsSettings["image_topic"] >> IMAGE_TOPIC;
+    fsSettings["image_topic"] >> IMAGE_TOPIC;  // 返回image_topic的节点数据给IMAGE_TOPIC
     fsSettings["imu_topic"] >> IMU_TOPIC;
     MAX_CNT = fsSettings["max_cnt"];
     MIN_DIST = fsSettings["min_dist"];

@@ -19,10 +19,10 @@ ros::Publisher pub_img,pub_match;
 ros::Publisher pub_restart;
 
 FeatureTracker trackerData[NUM_OF_CAM];  // 存储当前时刻所有相关的数据
-double first_image_time;  // 每隔delta_t = 1/FREQ 时间的帧对应的时间戳;FREQ:发布特征点的频率
+double first_image_time;  // 第一帧图像时间戳
 int pub_count = 1;  // 每隔delta_t = 1/FREQ 时间内连续(没有中断/没有报错)发布的帧数
-bool first_image_flag = true;  // 0:当前是第一帧  1:当前不是第一帧
-double last_image_time = 0;  // 当前帧或上一帧的时间戳
+bool first_image_flag = true;  // 1:当前是第一帧  0:当前不是第一帧
+double last_image_time = 0;  // 上一帧图像的时间戳
 bool init_pub = 0;  // 0:第一帧不把特征发布到buf里    1:发布到buf里
 
 
@@ -38,26 +38,26 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
         return;
     }
     // detect unstable camera stream
-    // 对于时间戳错乱的帧，重新初始化
+    // 对于时间戳错乱的帧(时间戳间隔超过1s，图像时间差太多光流追踪就会失败)，重新初始化
     if (img_msg->header.stamp.toSec() - last_image_time > 1.0 || img_msg->header.stamp.toSec() < last_image_time)
     {
         ROS_WARN("image discontinue! reset the feature tracker!");
         first_image_flag = true; 
         last_image_time = 0;
         pub_count = 1;
-        std_msgs::Bool restart_flag;    
+        std_msgs::Bool restart_flag;  // 0:不重启  1：重启
         restart_flag.data = true;
-        pub_restart.publish(restart_flag);
+        pub_restart.publish(restart_flag);  // 告诉其他模块要重启了
         return;
     }
-    last_image_time = img_msg->header.stamp.toSec();
+    last_image_time = img_msg->header.stamp.toSec();  // 如果时间戳没问题，记录当前时间
 
-    // frequency control
+    // frequency control，控制一下发给后端的频率在10Hz左右
     // 计算当前累计的pub_count个帧的频率与FREQ的关系
     if (round(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time)) <= FREQ)
     {// 要想发布图像帧，那么实际频率要比设定值小;但是，如果实际频率与设定频率的累积误差大于0.01了，就不能发布这一帧
         PUB_THIS_FRAME = true;  // 发布特征点
-        // reset the frequency control
+        // 如果这段时间的频率和预设频率十分接近，就认为这段时间很棒，重启一下，避免delta_t太大
         if (abs(1.0 * pub_count / (img_msg->header.stamp.toSec() - first_image_time) - FREQ) < 0.01 * FREQ)
         {// this "if" make sure the frequece is not so high
             first_image_time = img_msg->header.stamp.toSec();
@@ -72,7 +72,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
     cv_bridge::CvImageConstPtr ptr;
     if (img_msg->encoding == "8UC1")  // 8位灰度图像 
     {
-        sensor_msgs::Image img;  
+        sensor_msgs::Image img;  // Change 'sensor_msgs::ImageConstPtr'(const) to non-const
         img.header = img_msg->header;
         img.height = img_msg->height;
         img.width = img_msg->width;
@@ -85,10 +85,11 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
     }
     else
         ptr = cv_bridge::toCvCopy(img_msg, sensor_msgs::image_encodings::MONO8);
-    // img_msg或img都是sensor_msg格式的，我们需要一个桥梁，转换为CV::Mat格式的数据，以供后续图像处理
+    // img_msg和img都是sensor_msg格式的，我们需要一个桥梁，转换为CV::Mat格式的数据，以供后续图像处理
     cv::Mat show_img = ptr->image;
-    TicToc t_r;
 
+    TicToc t_r;
+    
     //对最新帧forw的特征点的提取和光流追踪(该函数核心部分！！！)；基本上调用了feature_tracker.cpp里面的全部函数
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
@@ -220,13 +221,13 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "feature_tracker");  // 配置ros的初始化和句柄
-    ros::NodeHandle n("~");
-    ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);
+    ros::init(argc, argv, "feature_tracker");  // ros节点初始化
+    ros::NodeHandle n("~");  // 声明一个句柄，~代表这个节点的命名空间，"~"参数代表节点的命名空间在feature_tracker下
+    ros::console::set_logger_level(ROSCONSOLE_DEFAULT_NAME, ros::console::levels::Info);  // 设置ros log级别
     readParameters(n);  // 读取参数，config->euroc->euroc_config.yaml中的一些配置参数
 
     for (int i = 0; i < NUM_OF_CAM; i++)
-        trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);  // 读取相机内参
+        trackerData[i].readIntrinsicParameter(CAM_NAMES[i]);  // 读取每个相机内参，只有一个相机
 
     if(FISHEYE)  // 判断是否加入鱼眼mask来去除边缘噪声
     {
@@ -243,17 +244,18 @@ int main(int argc, char **argv)
         }
     }
 
-    // 订阅话题和发布话题，监听IMAGE_TOPIC（/cam0/image_raw），有图像发布到这个话题上的时候，执行回调函数，这里直接进入到img_callback函数中接收图像
-    ros::Subscriber sub_img = n.subscribe(IMAGE_TOPIC, 100, img_callback);
+    // 订阅话题IMAGE_TOPIC（/cam0/image_raw），有图像发布到这个话题上的时候，执行回调函数，这里直接进入到img_callback函数中接收图像
+    ros::Subscriber sub_img = n.subscribe(IMAGE_TOPIC, 100, img_callback);  // 缓存大小为100个消息，每收到一次消息，运行回调函数
 
-    pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
-    pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);
-    pub_restart = n.advertise<std_msgs::Bool>("restart",1000);
+    // 分别在feature，feature_img，restart话题上发布消息
+    pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);  // 跟踪的特征点图像，主要是之后给RVIZ用和调试用
+    pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);  // 即跟踪的特征点信息，由/vins_estimator订阅并进行优化 
+    pub_restart = n.advertise<std_msgs::Bool>("restart",1000);  // 判断特征跟踪模块是否出错，若有问题则进行复位，由/vins_estimator订阅
     /*
     if (SHOW_TRACK)
         cv::namedWindow("vis", cv::WINDOW_NORMAL);
     */
-    ros::spin();
+    ros::spin();  // ROS消息回调处理函数,没有的话回调函数将永远不会调用
     return 0;
 }
 

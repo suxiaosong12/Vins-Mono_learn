@@ -48,7 +48,7 @@ class FeatureTracker
 
     cv::Mat mask;  // 图像掩码
     cv::Mat fisheye_mask;  // 鱼眼相机掩码，用于去除边缘噪点
-    cv::Mat prev_img, cur_img, forw_img;  // 上上次发布的帧的图像数据/当前的图像数据/光流跟踪的上一帧的图像数据
+    cv::Mat prev_img, cur_img, forw_img;  // 这里forw表示当前帧，cur表示上一帧，prev表示上上帧
     vector<cv::Point2f> n_pts;  // 每一帧中新提取的特征点
     vector<cv::Point2f> prev_pts, cur_pts, forw_pts;  // 对应的图像特征点
     vector<cv::Point2f> prev_un_pts, cur_un_pts;  // 归一化相机坐标系下的坐标
