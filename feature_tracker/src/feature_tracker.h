@@ -54,7 +54,7 @@ class FeatureTracker
     vector<cv::Point2f> prev_un_pts, cur_un_pts;  // 归一化相机坐标系下的坐标
     vector<cv::Point2f> pts_velocity;  // 当前帧相对前一帧特征点沿x,y方向的像素移动速
     vector<int> ids;  // 能够被跟踪到的特征点的id
-    vector<int> track_cnt;  // 当前帧forw_img中每个特征点被追踪的时间次
+    vector<int> track_cnt;  // 当前帧forw_img中每个特征点被追踪次数
     map<int, cv::Point2f> cur_un_pts_map;  // 构建id与归一化坐标的id，见undistortedPoints()
     map<int, cv::Point2f> prev_un_pts_map;
     camodocal::CameraPtr m_camera;  // 相机模型

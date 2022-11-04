@@ -96,7 +96,9 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
         ROS_DEBUG("processing camera %d", i);
         if (i != 1 || !STEREO_TRACK)  // 单目时：FeatureTracker::readImage() 函数读取图像数据进行处理
             trackerData[i].readImage(ptr->image.rowRange(ROW * i, ROW * (i + 1)), img_msg->header.stamp.toSec());
-        else  // readImage()传了2个参数，当前帧的图像和当前帧的时间戳
+            // readImage()传了2个参数，当前帧的图像和当前帧的时间戳
+            // readImage()函数作用：1.图像均衡化预处理；2.光流追踪；3提取新的特征点（如果发布；4所有特征点去畸变，计算速度
+        else
         {
             if (EQUALIZE)  // 判断是否对图像进行自适应直方图均衡化
             {
