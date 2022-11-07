@@ -119,7 +119,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
         bool completed = false;  // completed如果是true，说明没有更新完id，则持续循环，如果是false，说明更新完了则跳出循环
         for (int j = 0; j < NUM_OF_CAM; j++)
             if (j != 1 || !STEREO_TRACK)
-                completed |= trackerData[j].updateID(i);
+                completed |= trackerData[j].updateID(i);  // |=按位或并赋值，单目相机可直接取=
         if (!completed)
             break;
     }
@@ -127,7 +127,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
    // 特征点的发布
    if (PUB_THIS_FRAME)  // 如果PUB_THIS_FRAME=1则进行发布
    {
-        pub_count++;
+        pub_count++;  // 更新计数器
         sensor_msgs::PointCloudPtr feature_points(new sensor_msgs::PointCloud);  // 归一化坐标
         sensor_msgs::ChannelFloat32 id_of_point;
         sensor_msgs::ChannelFloat32 u_of_point;  // 像素坐标x
@@ -156,6 +156,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
                     p.y = un_pts[j].y;
                     p.z = 1;
 
+                    // 利用这个ros消息的格式进行信息存储
                     feature_points->points.push_back(p);  // 归一化坐标
                     id_of_point.values.push_back(p_id * NUM_OF_CAM + i);
                     u_of_point.values.push_back(cur_pts[j].x);  // 像素坐标
@@ -179,7 +180,7 @@ void img_callback(const sensor_msgs::ImageConstPtr &img_msg)  // 接收图像
             init_pub = 1;
         }
         else
-            pub_img.publish(feature_points);
+            pub_img.publish(feature_points);  // 前端得到的信息通过这个publisher发布出去
 
         // 将图像封装到cv_bridge::cvtColor类型的ptr实例中发布到pub_match
         if (SHOW_TRACK)
