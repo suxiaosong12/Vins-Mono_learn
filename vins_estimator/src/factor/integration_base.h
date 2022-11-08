@@ -11,10 +11,10 @@ class IntegrationBase
   public:
     IntegrationBase() = delete;
     IntegrationBase(const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,
-                    const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)
+                    const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)  // 输入：初始时刻的加速度和角速度值，两个零偏
         : acc_0{_acc_0}, gyr_0{_gyr_0}, linearized_acc{_acc_0}, linearized_gyr{_gyr_0},
           linearized_ba{_linearized_ba}, linearized_bg{_linearized_bg},
-            jacobian{Eigen::Matrix<double, 15, 15>::Identity()}, covariance{Eigen::Matrix<double, 15, 15>::Zero()},
+            jacobian{Eigen::Matrix<double, 15, 15>::Identity()}, covariance{Eigen::Matrix<double, 15, 15>::Zero()},  // 雅可比矩阵初始化为单位矩阵，协方差矩阵初始化为零矩阵
           sum_dt{0.0}, delta_p{Eigen::Vector3d::Zero()}, delta_q{Eigen::Quaterniond::Identity()}, delta_v{Eigen::Vector3d::Zero()}
 
     {
@@ -27,7 +27,7 @@ class IntegrationBase
         noise.block<3, 3>(15, 15) =  (GYR_W * GYR_W) * Eigen::Matrix3d::Identity();
     }
 
-    void push_back(double dt, const Eigen::Vector3d &acc, const Eigen::Vector3d &gyr)
+    void push_back(double dt, const Eigen::Vector3d &acc, const Eigen::Vector3d &gyr)  // 输入：时间戳，当前时刻加速度计测量值，当前时刻角速度值
     {
         dt_buf.push_back(dt);
         acc_buf.push_back(acc);
@@ -51,20 +51,20 @@ class IntegrationBase
             propagate(dt_buf[i], acc_buf[i], gyr_buf[i]);
     }
 
-    void midPointIntegration(double _dt, 
-                            const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,
-                            const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,
-                            const Eigen::Vector3d &delta_p, const Eigen::Quaterniond &delta_q, const Eigen::Vector3d &delta_v,
-                            const Eigen::Vector3d &linearized_ba, const Eigen::Vector3d &linearized_bg,
-                            Eigen::Vector3d &result_delta_p, Eigen::Quaterniond &result_delta_q, Eigen::Vector3d &result_delta_v,
-                            Eigen::Vector3d &result_linearized_ba, Eigen::Vector3d &result_linearized_bg, bool update_jacobian)
+    void midPointIntegration(double _dt, // 时间戳
+                            const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,  // k时刻加速度，k时刻角速度
+                            const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,  // k+1时刻加速度，k+1时刻角速度
+                            const Eigen::Vector3d &delta_p, const Eigen::Quaterniond &delta_q, const Eigen::Vector3d &delta_v,  //k时刻的alpha，gamma，beta
+                            const Eigen::Vector3d &linearized_ba, const Eigen::Vector3d &linearized_bg,  // 两个零偏
+                            Eigen::Vector3d &result_delta_p, Eigen::Quaterniond &result_delta_q, Eigen::Vector3d &result_delta_v,  // 输出的alpha，gamma，beta
+                            Eigen::Vector3d &result_linearized_ba, Eigen::Vector3d &result_linearized_bg, bool update_jacobian)  // 两个零偏，标志位(是否更新Jacobi)
     {
         //ROS_INFO("midpoint integration");
-        Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);
-        Vector3d un_gyr = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;
-        result_delta_q = delta_q * Quaterniond(1, un_gyr(0) * _dt / 2, un_gyr(1) * _dt / 2, un_gyr(2) * _dt / 2);
-        Vector3d un_acc_1 = result_delta_q * (_acc_1 - linearized_ba);
-        Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
+        Vector3d un_acc_0 = delta_q * (_acc_0 - linearized_ba);  // k时刻加速度的值在初始帧坐标系下的坐标
+        Vector3d un_gyr = 0.5 * (_gyr_0 + _gyr_1) - linearized_bg;  // k时刻和k+1时刻角速度均值
+        result_delta_q = delta_q * Quaterniond(1, un_gyr(0) * _dt / 2, un_gyr(1) * _dt / 2, un_gyr(2) * _dt / 2);  // 更新gamma
+        Vector3d un_acc_1 = result_delta_q * (_acc_1 - linearized_ba);  // k+1时刻加速度值
+        Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);  // 加速度均值
         result_delta_p = delta_p + delta_v * _dt + 0.5 * un_acc * _dt * _dt;
         result_delta_v = delta_v + un_acc * _dt;
         result_linearized_ba = linearized_ba;
@@ -121,7 +121,7 @@ class IntegrationBase
 
             //step_jacobian = F;
             //step_V = V;
-            jacobian = F * jacobian;
+            jacobian = F * jacobian;  // 更新雅可比矩阵和协方差矩阵
             covariance = F * covariance * F.transpose() + V * noise * V.transpose();
         }
 
@@ -141,7 +141,7 @@ class IntegrationBase
         midPointIntegration(_dt, acc_0, gyr_0, _acc_1, _gyr_1, delta_p, delta_q, delta_v,
                             linearized_ba, linearized_bg,
                             result_delta_p, result_delta_q, result_delta_v,
-                            result_linearized_ba, result_linearized_bg, 1);
+                            result_linearized_ba, result_linearized_bg, 1);  // 调用了midPointIntegration函数利用中值积分算法进行预积分
 
         //checkJacobian(_dt, acc_0, gyr_0, acc_1, gyr_1, delta_p, delta_q, delta_v,
         //                    linearized_ba, linearized_bg);
@@ -159,24 +159,24 @@ class IntegrationBase
 
     Eigen::Matrix<double, 15, 1> evaluate(const Eigen::Vector3d &Pi, const Eigen::Quaterniond &Qi, const Eigen::Vector3d &Vi, const Eigen::Vector3d &Bai, const Eigen::Vector3d &Bgi,
                                           const Eigen::Vector3d &Pj, const Eigen::Quaterniond &Qj, const Eigen::Vector3d &Vj, const Eigen::Vector3d &Baj, const Eigen::Vector3d &Bgj)
-    {
+    {// get IMU residuals   Qi transform coordinate from i to w; Vi volosity at time i in w coordinate
         Eigen::Matrix<double, 15, 1> residuals;
+        // O_P = 0,O_R = 3, O_V = 6, O_BA = 9, O_BG = 12
+        Eigen::Matrix3d dp_dba = jacobian.block<3, 3>(O_P, O_BA);  // 0，9
+        Eigen::Matrix3d dp_dbg = jacobian.block<3, 3>(O_P, O_BG);  // 0，12
 
-        Eigen::Matrix3d dp_dba = jacobian.block<3, 3>(O_P, O_BA);
-        Eigen::Matrix3d dp_dbg = jacobian.block<3, 3>(O_P, O_BG);
+        Eigen::Matrix3d dq_dbg = jacobian.block<3, 3>(O_R, O_BG);  // 3， 12
 
-        Eigen::Matrix3d dq_dbg = jacobian.block<3, 3>(O_R, O_BG);
-
-        Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(O_V, O_BA);
-        Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(O_V, O_BG);
+        Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(O_V, O_BA);  // 6， 9
+        Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(O_V, O_BG);  // 6， 12
 
         Eigen::Vector3d dba = Bai - linearized_ba;
         Eigen::Vector3d dbg = Bgi - linearized_bg;
-
+        // IMU预积分的结果,消除掉acc bias和gyro bias的影响, 对应IMU model中的\hat{\alpha},\hat{\beta},\hat{\gamma}
         Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);
         Eigen::Vector3d corrected_delta_v = delta_v + dv_dba * dba + dv_dbg * dbg;
         Eigen::Vector3d corrected_delta_p = delta_p + dp_dba * dba + dp_dbg * dbg;
-
+        // IMU项residual计算,输入参数是状态的估计值, 上面correct_delta_*是预积分值, 二者求'diff'得到residual.
         residuals.block<3, 1>(O_P, 0) = Qi.inverse() * (0.5 * G * sum_dt * sum_dt + Pj - Pi - Vi * sum_dt) - corrected_delta_p;
         residuals.block<3, 1>(O_R, 0) = 2 * (corrected_delta_q.inverse() * (Qi.inverse() * Qj)).vec();
         residuals.block<3, 1>(O_V, 0) = Qi.inverse() * (G * sum_dt + Vj - Vi) - corrected_delta_v;

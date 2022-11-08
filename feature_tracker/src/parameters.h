@@ -2,8 +2,8 @@
 #include <ros/ros.h>
 #include <opencv2/highgui/highgui.hpp>
 
-extern int ROW;
-extern int COL;
+extern int ROW;  // 图片高度
+extern int COL;  // 图片长度
 extern int FOCAL_LENGTH;
 const int NUM_OF_CAM = 1;  //单目相机
 

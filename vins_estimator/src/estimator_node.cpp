@@ -41,16 +41,16 @@ double last_imu_t = 0;
 
 void predict(const sensor_msgs::ImuConstPtr &imu_msg)
 {
-    double t = imu_msg->header.stamp.toSec();
+    double t = imu_msg->header.stamp.toSec();  // 获取当前时间
     if (init_imu)
     {
         latest_time = t;
         init_imu = 0;
         return;
     }
-    double dt = t - latest_time;
+    double dt = t - latest_time;  // 获取dt并传递时间
     latest_time = t;
-
+    // 获取当前时刻的IMU采样数据
     double dx = imu_msg->linear_acceleration.x;
     double dy = imu_msg->linear_acceleration.y;
     double dz = imu_msg->linear_acceleration.z;
@@ -60,7 +60,7 @@ void predict(const sensor_msgs::ImuConstPtr &imu_msg)
     double ry = imu_msg->angular_velocity.y;
     double rz = imu_msg->angular_velocity.z;
     Eigen::Vector3d angular_velocity{rx, ry, rz};
-
+    // 注意，以下数据都是世界坐标系下的
     Eigen::Vector3d un_acc_0 = tmp_Q * (acc_0 - tmp_Ba) - estimator.g;
 
     Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - tmp_Bg;
@@ -72,7 +72,7 @@ void predict(const sensor_msgs::ImuConstPtr &imu_msg)
 
     tmp_P = tmp_P + dt * tmp_V + 0.5 * dt * dt * un_acc;
     tmp_V = tmp_V + dt * un_acc;
-
+    // 信息传递
     acc_0 = linear_acceleration;
     gyr_0 = angular_velocity;
 }
