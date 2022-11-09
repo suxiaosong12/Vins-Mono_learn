@@ -90,8 +90,8 @@ class FeatureManager
     void removeBack();
     void removeFront(int frame_count);
     void removeOutlier();
-    list<FeaturePerId> feature;
-    int last_track_num;
+    list<FeaturePerId> feature; // 管理滑动窗口中所有的特征点
+    int last_track_num; // 最新帧图像跟踪到的特征点的数量
 
   private:
     double compensatedParallax2(const FeaturePerId &it_per_id, int frame_count);
