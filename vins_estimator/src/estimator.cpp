@@ -6,7 +6,7 @@ Estimator::Estimator(): f_manager{Rs}
     clearState();
 }
 
-void Estimator::setParameter()
+void Estimator::setParameter()  // 它读取了每一个相机到IMU坐标系的旋转/平移外参数和非线性优化的重投影误差部分的信息矩阵
 {
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
@@ -14,7 +14,7 @@ void Estimator::setParameter()
         ric[i] = RIC[i];
     }
     f_manager.setRic(ric);
-    ProjectionFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
+    ProjectionFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();  // 这里可以看到虚拟相机的用法
     ProjectionTdFactor::sqrt_info = FOCAL_LENGTH / 1.5 * Matrix2d::Identity();
     td = TD;
 }

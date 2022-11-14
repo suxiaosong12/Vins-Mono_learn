@@ -34,7 +34,7 @@ class IntegrationBase
         gyr_buf.push_back(gyr);
         propagate(dt, acc, gyr);
     }
-    
+
     // bk到bk+1的PVQ传播矫正和误差传递矫正
     void repropagate(const Eigen::Vector3d &_linearized_ba, const Eigen::Vector3d &_linearized_bg)
     {
@@ -53,7 +53,7 @@ class IntegrationBase
     }
 
     // 基于中值法的IMU预积分
-    void midPointIntegration(double _dt,  // 时间戳
+    void midPointIntegration(double _dt,  // 时间间隔
                             const Eigen::Vector3d &_acc_0, const Eigen::Vector3d &_gyr_0,  // k时刻加速度，k时刻角速度
                             const Eigen::Vector3d &_acc_1, const Eigen::Vector3d &_gyr_1,  // k + 1时刻加速度，k + 1时刻角速度
                             const Eigen::Vector3d &delta_p, const Eigen::Quaterniond &delta_q, const Eigen::Vector3d &delta_v,  // k时刻的p, q, v误差项
@@ -154,7 +154,7 @@ class IntegrationBase
         delta_v = result_delta_v;
         linearized_ba = result_linearized_ba;
         linearized_bg = result_linearized_bg;
-        delta_q.normalize();
+        delta_q.normalize();  // 归一化，
         sum_dt += dt;
         acc_0 = acc_1;
         gyr_0 = gyr_1;  

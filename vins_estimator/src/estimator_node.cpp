@@ -50,35 +50,35 @@ double last_imu_t = 0; // 最近一帧IMU数据的时间戳
 void predict(const sensor_msgs::ImuConstPtr &imu_msg)
 {
     double t = imu_msg->header.stamp.toSec();
-    if (init_imu) // 第一次接收IMU数据
+    if (init_imu) // 如果是第一帧imu，只保留上一帧的时间
     {
         latest_time = t;
         init_imu = 0;
         return;
     }
-    double dt = t - latest_time;
+    double dt = t - latest_time;  // 计算两帧之间的时间差
     latest_time = t;
 
     double dx = imu_msg->linear_acceleration.x;
     double dy = imu_msg->linear_acceleration.y;
     double dz = imu_msg->linear_acceleration.z;
-    Eigen::Vector3d linear_acceleration{dx, dy, dz};
+    Eigen::Vector3d linear_acceleration{dx, dy, dz};  // 加速度
 
     double rx = imu_msg->angular_velocity.x;
     double ry = imu_msg->angular_velocity.y;
     double rz = imu_msg->angular_velocity.z;
-    Eigen::Vector3d angular_velocity{rx, ry, rz};
+    Eigen::Vector3d angular_velocity{rx, ry, rz};  // 角速度
 
-    Eigen::Vector3d un_acc_0 = tmp_Q * (acc_0 - tmp_Ba) - estimator.g;
+    Eigen::Vector3d un_acc_0 = tmp_Q * (acc_0 - tmp_Ba) - estimator.g;  // 上一时刻世界坐标系下加速度值
 
-    Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - tmp_Bg;
-    tmp_Q = tmp_Q * Utility::deltaQ(un_gyr * dt);
+    Eigen::Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - tmp_Bg;  // 中值陀螺仪的结果
+    tmp_Q = tmp_Q * Utility::deltaQ(un_gyr * dt);  // 更新姿态
 
-    Eigen::Vector3d un_acc_1 = tmp_Q * (linear_acceleration - tmp_Ba) - estimator.g;
+    Eigen::Vector3d un_acc_1 = tmp_Q * (linear_acceleration - tmp_Ba) - estimator.g;  // 当前时刻世界坐标系下的加速度值
 
-    Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);
+    Eigen::Vector3d un_acc = 0.5 * (un_acc_0 + un_acc_1);  // 加速度中值积分的值
 
-    tmp_P = tmp_P + dt * tmp_V + 0.5 * dt * dt * un_acc;
+    tmp_P = tmp_P + dt * tmp_V + 0.5 * dt * dt * un_acc;  // 经典物理中位置、速度更新方程
     tmp_V = tmp_V + dt * un_acc;
 
     acc_0 = linear_acceleration;
@@ -166,7 +166,7 @@ void imu_callback(const sensor_msgs::ImuConstPtr &imu_msg)
     }
     last_imu_t = imu_msg->header.stamp.toSec(); 
 
-    // 将IMU数据存入IMU数据缓存队列imu_buf
+    // 进行线程锁的设置，将IMU数据存入IMU数据缓存队列imu_buf
     m_buf.lock();
     imu_buf.push(imu_msg);
     m_buf.unlock();
@@ -203,7 +203,7 @@ void feature_callback(const sensor_msgs::PointCloudConstPtr &feature_msg)
     con.notify_one(); // 唤醒getMeasurements()读取缓存imu_buf和feature_buf中的观测数据
 }
 
-void restart_callback(const std_msgs::BoolConstPtr &restart_msg)
+void restart_callback(const std_msgs::BoolConstPtr &restart_msg)  // 清空buffer，优化器复位，标志位清零
 {
     if (restart_msg->data == true)
     {
@@ -240,10 +240,11 @@ void process()
     while (true)
     {
         std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> measurements;
+        // 因为IMU的频率比视觉帧的发布频率要高，所以说在这里，需要把一个视觉帧和之前的一串IMU帧的数据配对起来
 
         // unique_lock对象lk以独占所有权的方式管理mutex对象m_buf的上锁和解锁操作，所谓独占所有权，就是没有其他的 unique_lock对象同时拥有m_buf的所有权，
         // 新创建的unique_lock对象lk管理Mutex对象m_buf，并尝试调用m_buf.lock()对Mutex对象m_buf进行上锁，如果此时另外某个unique_lock对象已经管理了该Mutex对象m_buf,
-        // 则当前线程将会被阻塞；如果此时m_buf本身就处于上锁状态，当前线程也会被阻塞（我猜的）。
+        // 则当前线程将会被阻塞；如果此时m_buf本身就处于上锁状态，当前线程也会被阻塞。
         // 在unique_lock对象lk的声明周期内，它所管理的锁对象m_buf会一直保持上锁状态
         std::unique_lock<std::mutex> lk(m_buf);
 
@@ -416,18 +417,18 @@ int main(int argc, char **argv)
 #endif
     ROS_WARN("waiting for image and imu...");
 
-    //RViz相关话题
-    registerPub(n); // 注册visualization.cpp中创建的发布器
+    // RViz相关话题
+    registerPub(n);  // 注册visualization.cpp中创建的发布器
     
-    ros::Subscriber sub_imu = n.subscribe(IMU_TOPIC, 2000, imu_callback, ros::TransportHints().tcpNoDelay()); // IMU数据
-    ros::Subscriber sub_image = n.subscribe("/feature_tracker/feature", 2000, feature_callback); // 图像特征点数据
-    ros::Subscriber sub_restart = n.subscribe("/feature_tracker/restart", 2000, restart_callback); // ？？？接收一个bool值，判断是否重启estimator
-    ros::Subscriber sub_relo_points = n.subscribe("/pose_graph/match_points", 2000, relocalization_callback); // ？？？根据回环检测信息进行重定位
+    ros::Subscriber sub_imu = n.subscribe(IMU_TOPIC, 2000, imu_callback, ros::TransportHints().tcpNoDelay());  // 接受imu消息
+    ros::Subscriber sub_image = n.subscribe("/feature_tracker/feature", 2000, feature_callback);  // 接受前端视觉光流结果
+    ros::Subscriber sub_restart = n.subscribe("/feature_tracker/restart", 2000, restart_callback);  // 接受前端重启命令，判断是否重启estimator
+    ros::Subscriber sub_relo_points = n.subscribe("/pose_graph/match_points", 2000, relocalization_callback);  // 回环检测的fast relocalization响应，根据回环检测信息进行重定位
 
     // estimator_node中的线程由旧版本中的3个改为现在的1个
     // 回环检测和全局位姿图优化在新增的一个ROS节点中运行
     // measurement_process线程的线程函数是process()，在process()中处理VIO后端，包括IMU预积分、松耦合初始化和local BA
-    std::thread measurement_process{process}; 
+    std::thread measurement_process{process};  // 调用核心处理线程处理push到buffer中的数据
     ros::spin();
 
     return 0;
