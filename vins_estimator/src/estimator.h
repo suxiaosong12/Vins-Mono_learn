@@ -83,7 +83,7 @@ class Estimator
     Vector3d back_P0, last_P, last_P0;
     std_msgs::Header Headers[(WINDOW_SIZE + 1)];
 
-    IntegrationBase *pre_integrations[(WINDOW_SIZE + 1)]; // 滑动窗口中每帧图像对应一个IntegrationBase对象
+    IntegrationBase *pre_integrations[(WINDOW_SIZE + 1)]; // 滑动窗口中每帧图像对应一个IntegrationBase对象，保存着frame_count帧中所有跟IMU预积分相关的量，包括F矩阵，Q矩阵，J矩阵等
     Vector3d acc_0, gyr_0; // 最近一次接收到的IMU数据
 
     // 滑动窗口中每一帧图像对应的预积分所用到的IMU数据存在3个缓存中

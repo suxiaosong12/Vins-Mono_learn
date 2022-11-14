@@ -91,7 +91,7 @@ void update()
     TicToc t_predict;
     latest_time = current_time;
 
-    // 首先获取滑动窗口中最新帧的P、V、Q
+    // 首先从估计器中得到滑动窗口中最后一个图像帧的imu更新项[P,Q,V,ba,bg,a,g]
     tmp_P = estimator.Ps[WINDOW_SIZE];
     tmp_Q = estimator.Rs[WINDOW_SIZE];
     tmp_V = estimator.Vs[WINDOW_SIZE];
@@ -101,6 +101,7 @@ void update()
     gyr_0 = estimator.gyr_0;
 
     // 滑动窗口中最新帧并不是当前帧，中间隔着缓存队列的数据，所以还需要使用缓存队列中的IMU数据进行积分得到当前帧的里程计信息
+    // 因为imu的频率比图像频率要高很多，在getMeasurements(）将图像和imu时间对齐后，imu_buf中还会存在imu数据
     queue<sensor_msgs::ImuConstPtr> tmp_imu_buf = imu_buf;
     for (sensor_msgs::ImuConstPtr tmp_imu_msg; !tmp_imu_buf.empty(); tmp_imu_buf.pop())
         predict(tmp_imu_buf.front());
@@ -108,7 +109,7 @@ void update()
 }
 
 std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>>
-getMeasurements()
+getMeasurements()  // 把图像帧 和 对应的IMU数据们 配对起来,而且IMU数据时间是在图像帧的前面
 {
     std::vector<std::pair<std::vector<sensor_msgs::ImuConstPtr>, sensor_msgs::PointCloudConstPtr>> measurements;
 
@@ -261,13 +262,13 @@ void process()
         // 释放m_buf（为了使图像和IMU回调函数可以访问缓存队列），阻塞当前线程，等待被con.notify_one()唤醒
         // 直到measurements不为空时（成功从缓存队列获取数据），匿名函数返回true，则可以退出while循环。
         con.wait(lk, [&]
-                 {
-            return (measurements = getMeasurements()).size() != 0;
+                 {  // 匿名函数，隐式引用捕获外部变量
+                    return (measurements = getMeasurements()).size() != 0;
                  });
         lk.unlock(); // 从缓存队列中读取数据完成，解锁
 
         m_estimator.lock();
-        for (auto &measurement : measurements)
+        for (auto &measurement : measurements)  // 遍历measurements中的每一个measurement (IMUs,IMG)组合
         {
             auto img_msg = measurement.second;
             double dx = 0, dy = 0, dz = 0, rx = 0, ry = 0, rz = 0;
@@ -295,23 +296,26 @@ void process()
                     rx = imu_msg->angular_velocity.x;
                     ry = imu_msg->angular_velocity.y;
                     rz = imu_msg->angular_velocity.z;
-                    estimator.processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz));
+                    // 这里干了2件事，IMU粗略地预积分，然后把值传给一个新建的IntegrationBase对象
+                    estimator.processIMU(dt, Vector3d(dx, dy, dz), Vector3d(rx, ry, rz));  // 进行IMU预积分
                     //printf("imu: dt:%f a: %f %f %f w: %f %f %f\n",dt, dx, dy, dz, rx, ry, rz);
 
                 }
-                else // 时间戳晚于图像特征点数据（时间偏移补偿后）的第一帧IMU数据（也是一组measurement中的唯一一帧），对IMU数据进行插值，得到图像帧时间戳对应的IMU数据
+                // 针对最后一个imu数据，需要利用倒数第二帧，图像帧和最后一帧进行插值，再调用processIMU函数
+                else // 最后一帧IMU数据，时间戳晚于图像特征点数据（也是一组measurement中的唯一一帧），对IMU数据进行插值，得到图像帧时间戳对应的IMU数据
                 {
                     // 时间戳的对应关系如下图所示：
                     //                                            current_time         t
                     // *               *               *               *               *     （IMU数据）
                     //                                                          |            （图像特征点数据）
                     //                                                        img_t
-                    double dt_1 = img_t - current_time;
+                    double dt_1 = img_t - current_time;  // current_time < img_time < t
                     double dt_2 = t - img_t;
                     current_time = img_t;
                     ROS_ASSERT(dt_1 >= 0);
                     ROS_ASSERT(dt_2 >= 0);
                     ROS_ASSERT(dt_1 + dt_2 > 0);
+                    // 以下操作为线性插值
                     double w1 = dt_2 / (dt_1 + dt_2);
                     double w2 = dt_1 / (dt_1 + dt_2);
                     dx = w1 * dx + w2 * imu_msg->linear_acceleration.x;
@@ -328,6 +332,7 @@ void process()
             // 设置重定位用的回环帧
             // set relocalization frame
             sensor_msgs::PointCloudConstPtr relo_msg = NULL;
+            // 在relo_buf中取出最后一个重定位帧，拿出其中的信息并执行setReloFrame()
             while (!relo_buf.empty())
             {
                 relo_msg = relo_buf.front();
@@ -356,11 +361,15 @@ void process()
 
             ROS_DEBUG("processing vision data with stamp %f \n", img_msg->header.stamp.toSec());
             TicToc t_s;
-            // 将图像特征点数据存到一个map容器中，key是特征点id
-            map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> image; // 为什么键值是一个vector啊，一个id的特征点对应一个vector，难道是因为可能有多个相机
+
+            // 将图像特征点数据存到一个map容器中，key是feature_id
+            // value值是一个vector，如果系统是多目的，那么同一个特征点在不同摄像头下会有不同的观测信息，那么这个vector，就是存储着某个特征点在所有摄像头上的信息。对于VINS-mono来说，value它不是vector，仅仅是一个pair
+            map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> image;
+
+            // 遍历img_msg里面的每一个特征点的归一化坐标
             for (unsigned int i = 0; i < img_msg->points.size(); i++)
-            {
-                int v = img_msg->channels[0].values[i] + 0.5; // ？？？这是什么操作
+            {   // 把img的信息提取出来放在image容器里去，通过这里，可以理解img信息里面装的都是些什么
+                int v = img_msg->channels[0].values[i] + 0.5; // channels[0].values[i]==id_of_point
                 int feature_id = v / NUM_OF_CAM;
                 int camera_id = v % NUM_OF_CAM;
                 double x = img_msg->points[i].x;
@@ -375,13 +384,14 @@ void process()
                 xyz_uv_velocity << x, y, z, p_u, p_v, velocity_x, velocity_y;
                 image[feature_id].emplace_back(camera_id,  xyz_uv_velocity);
             }
-            estimator.processImage(image, img_msg->header);
+            estimator.processImage(image, img_msg->header);  // 处理图像帧：初始化，紧耦合的非线性优化
 
             double whole_t = t_s.toc();
             printStatistics(estimator, whole_t);
             std_msgs::Header header = img_msg->header;
             header.frame_id = "world";
 
+            // 向RVIZ发布里程计信息、关键位姿、相机位姿、点云和TF关系，这些函数都定义在中utility/visualization.cpp里，都是ROS相关代码
             // 每处理完一帧图像特征点数据，都要发布这些话题
             pubOdometry(estimator, header);
             pubKeyPoses(estimator, header);
@@ -399,7 +409,7 @@ void process()
         m_state.lock();
         if (estimator.solver_flag == Estimator::SolverFlag::NON_LINEAR)
             // VINS系统完成滑动窗口优化后，用优化后的结果，更新里程计数据
-            update();
+            update();  // 更新IMU参数[P,Q,V,ba,bg,a,g]
         m_state.unlock();
         m_buf.unlock();
     }

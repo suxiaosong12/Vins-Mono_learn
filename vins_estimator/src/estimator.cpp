@@ -86,21 +86,25 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
     if (!first_imu) // first_imu == false：未获取第一帧IMU数据
     {
         first_imu = true;
-        // 将第一帧IMU数据记录下来
+        // 如果当前帧不是第一帧IMU，那么就把它看成第一个IMU，而且把他的值取出来作为初始值
         acc_0 = linear_acceleration;
         gyr_0 = angular_velocity;
     }
 
-    if (!pre_integrations[frame_count])
+    // 滑窗中保留11帧，frame_count表示现在处理第几帧，一般处理到第11帧时就保持不变了
+    // pre_integrations[frame_count]，它是IntegrationBase的一个实例，它保存着frame_count帧中所有跟IMU预积分相关的量，包括F矩阵，Q矩阵，J矩阵等
+    if (!pre_integrations[frame_count])  // 如果当前IMU帧没有构造IntegrationBase，那就构造一个，后续会用上
     {
         pre_integrations[frame_count] = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
     }
+
     if (frame_count != 0) // 在初始化时，第一帧图像特征点数据没有对应的预积分
     {
         pre_integrations[frame_count]->push_back(dt, linear_acceleration, angular_velocity);
         //if(solver_flag != NON_LINEAR)
             tmp_pre_integration->push_back(dt, linear_acceleration, angular_velocity);
 
+        // 保存传感器数据
         dt_buf[frame_count].push_back(dt);
         linear_acceleration_buf[frame_count].push_back(linear_acceleration);
         angular_velocity_buf[frame_count].push_back(angular_velocity);
@@ -108,7 +112,8 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
         // 用IMU数据进行积分，当积完一个measurement中所有IMU数据后，就得到了对应图像帧在世界坐标系中的Ps、Vs、Rs
         // 下面这一部分的积分，在没有成功完成初始化时似乎是没有意义的，因为在没有成功初始化时，对IMU数据来说是没有世界坐标系的
         // 当成功完成了初始化后，下面这一部分积分才有用，它可以通过IMU积分得到滑动窗口中最新帧在世界坐标系中的
-        int j = frame_count;         
+        int j = frame_count;
+        // 下面都采用的是中值积分的传播方式，noise被忽略了  
         Vector3d un_acc_0 = Rs[j] * (acc_0 - Bas[j]) - g;
         Vector3d un_gyr = 0.5 * (gyr_0 + angular_velocity) - Bgs[j];
         Rs[j] *= Utility::deltaQ(un_gyr * dt).toRotationMatrix();
@@ -121,6 +126,7 @@ void Estimator::processIMU(double dt, const Vector3d &linear_acceleration, const
     gyr_0 = angular_velocity;
 }
 
+// 传入的参数分别是当前帧上的所有特征点和当前帧的时间戳
 void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, const std_msgs::Header &header)
 {
     ROS_DEBUG("new image coming ------------------------------------------");
@@ -130,7 +136,8 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     // 计算第2最新帧与第3最新帧之间的平均视差（当前帧是第1最新帧），然后判断是否把第2最新帧添加为关键帧
     // 在未完成初始化时，如果窗口没有塞满，那么是否添加关键帧的判定结果不起作用，滑动窗口要塞满
     // 只有在滑动拆个纽扣塞满后，或者初始化完成之后，才需要滑动窗口，此时才需要做关键帧判别，根据第2最新关键帧是否未关键帧选择相应的边缘化策略
-    if (f_manager.addFeatureCheckParallax(frame_count, image, td))
+    // VINS滑动窗口采取的是这样的策略，它判断当前帧是不是关键帧，如果是关键帧，滑窗的时候marg掉最老帧；如果不是关键帧，则marg掉上一帧
+    if (f_manager.addFeatureCheckParallax(frame_count, image, td))  // true：上一帧是关键帧，marg_old; false:上一帧不是关键帧marg_second_new
         marginalization_flag = MARGIN_OLD;
     else
         marginalization_flag = MARGIN_SECOND_NEW;
@@ -141,10 +148,12 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     ROS_DEBUG("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
 
+    // 将图像数据、时间、临时预积分值存到图像帧类中
+    // imageframe是ImageFrame的一个实例。用于融合IMU和视觉信息的数据结构，包括了某一帧的全部信息:位姿，特征点信息，预积分信息，是否是关键帧等。
     ImageFrame imageframe(image, header.stamp.toSec());
     imageframe.pre_integration = tmp_pre_integration;
     all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe)); // 每读取一帧图像特征点数据，都会存入all_image_frame
-    tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
+    tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};  // 更新临时预积分初始值
 
     // 相机与IMU外参的在线标定
     if(ESTIMATE_EXTRINSIC == 2)

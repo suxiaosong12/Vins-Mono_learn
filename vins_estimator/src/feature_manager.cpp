@@ -46,8 +46,12 @@ int FeatureManager::getFeatureCount()
  * 计算第2最新帧与第3最新帧之间的平均视差（当前帧是第1最新帧）
  * 也就是说当前帧图像特征点存入feature中后，并不会立即判断是否将当前帧添加为新的关键帧，而是去判断当前帧的前一帧（第2最新帧）。
  * 当前帧图像要在下一次接收到图像时进行判断（那个时候，当前帧已经变成了第2最新帧）
+ * 这部分里写了2个判断关键帧的判断指标：
+ * 第一个是“the average parallax apart from the previous keyframe”，对应着代码中parallax_num和parallax_sum / parallax_num；
+ * 第二个是“If the number of tracked features goes below a certain threshold, we treat this frame as a new keyframe”，对应着代码里的last_track_num。
+ * 注意，这部分里还有一个函数是compensatedParallax2()，用来计算当前特征点的视差
  */
-bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, double td)
+bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> &image, double td)  // 关键帧判断
 {
     ROS_DEBUG("input feature: %d", (int)image.size());
     ROS_DEBUG("num of feature: %d", getFeatureCount());
