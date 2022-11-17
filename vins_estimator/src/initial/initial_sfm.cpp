@@ -141,8 +141,9 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 
 	// have relative_r relative_t
 	// intial two view
-	//把relativePose找到的第l帧（是字母l，不是数字1，l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置，最后一帧的pose为relative_R,relative_T
+	// 把relativePose找到的第l帧（是字母l，不是数字1，l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置，最后一帧的pose为relative_R,relative_T
 	// 第l帧的姿态设置为一个没有任何旋转的实单位四元数
+	// 枢纽帧设置为单位帧，也可以理解为世界系原点
 	q[l].w() = 1;
 	q[l].x() = 0;
 	q[l].y() = 0;
@@ -152,11 +153,12 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	T[l].setZero();
 
 	// 滑动窗口中最新帧到第l（字母l，不是数字1）的旋转和位移
-	q[frame_num - 1] = q[l] * Quaterniond(relative_R);
+	q[frame_num - 1] = q[l] * Quaterniond(relative_R);  // 求得最后一帧的位姿
 	T[frame_num - 1] = relative_T;
 	//cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
 	//cout << "init t_l " << T[l].transpose() << endl;
 
+	// 由于纯视觉slam处理都是Tcw,因此下面把Twc转成Tcw
 	//rotate to cam frame
 	Matrix3d c_Rotation[frame_num];
 	Vector3d c_Translation[frame_num];
@@ -168,6 +170,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧在世界坐标系（个人推断，一开始是把第l帧相机坐标系作为世界坐标系，注意是字母l，不是数字1）中的位姿
 
 	// 第l帧
+	// 将枢纽帧和最后一帧Twc转成Tcw，包括四元数，旋转矩阵，平移向量和增广矩阵
 	c_Quat[l] = q[l].inverse(); // 四元数取逆（实际上就是共轭），相当于旋转矩阵取逆，得到从第l帧相机坐标系到第l帧相机坐标系的旋转
 	c_Rotation[l] = c_Quat[l].toRotationMatrix(); // 四元数转旋转矩阵
 	c_Translation[l] = -1 * (c_Rotation[l] * T[l]); // 从第l帧相机坐标系到第l帧相机坐标系的位移
@@ -199,6 +202,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		// pnp求解位姿
 		if (i > l)
 		{
+			// 这是依次求解，因此上一帧的位姿是已知量
 			Matrix3d R_initial = c_Rotation[i - 1];
 			Vector3d P_initial = c_Translation[i - 1];
 			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))
@@ -212,7 +216,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 
 		// triangulate point based on the solve pnp result
 		// 遍历l帧到第（frame_num - 2）帧，寻找与第（frame_num - 1）帧的匹配，三角化特征点
-		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);
+		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);  // 当前帧和最后一帧进行三角化处理
 	}
 
 
@@ -297,6 +301,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	for (int i = 0; i < frame_num; i++)
 	{
 		//double array for ceres
+		// 这些都是待优化的参数块
 		c_translation[i][0] = c_Translation[i].x();
 		c_translation[i][1] = c_Translation[i].y();
 		c_translation[i][2] = c_Translation[i].z();
@@ -306,6 +311,8 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		c_rotation[i][3] = c_Quat[i].z();
 		problem.AddParameterBlock(c_rotation[i], 4, local_parameterization);
 		problem.AddParameterBlock(c_translation[i], 3);
+		// 由于是单目视觉slam，有七个自由度不可观，因此，fix一些参数块避免在零空间漂移
+		// fix设置的世界坐标系第l帧的位姿，同时fix最后一帧的位移用来fix尺度
 		if (i == l)
 		{
 			problem.SetParameterBlockConstant(c_rotation[i]);
@@ -316,22 +323,30 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		}
 	}
 
+	// 只有视觉重投影构成约束，因此遍历所有的特征点，构建约束
 	for (int i = 0; i < feature_num; i++)
 	{
-		if (sfm_f[i].state != true)
+		if (sfm_f[i].state != true)  // 必须是三角化之后的
 			continue;
-		for (int j = 0; j < int(sfm_f[i].observation.size()); j++)
+		for (int j = 0; j < int(sfm_f[i].observation.size()); j++)  // 遍历所有的观测帧，对这些帧建立约束
 		{
 			int l = sfm_f[i].observation[j].first;
 			ceres::CostFunction* cost_function = ReprojectionError3D::Create(
 												sfm_f[i].observation[j].second.x(),
 												sfm_f[i].observation[j].second.y());
-
+			// 约束了这一帧位姿和3d地图点
     		problem.AddResidualBlock(cost_function, NULL, c_rotation[l], c_translation[l], 
-    								sfm_f[i].position);	 
+    								sfm_f[i].position);	 // 残差快结构体，核函数，[参数列表]
 		}
 
 	}
+
+	/*
+	Ceres非线性优化问题求解:
+	1.设置求解方式，求解最大时间
+	2.如果结果收敛或cost值很小，认为求解成功
+	3.将求解结果进行赋值
+	*/
 	ceres::Solver::Options options;
 	options.linear_solver_type = ceres::DENSE_SCHUR;
 	//options.minimizer_progress_to_stdout = true;
@@ -348,6 +363,9 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		//cout << "vision only BA not converge " << endl;
 		return false;
 	}
+
+	// 优化结束，把double数组的值返回成对应类型的值
+	// 同时Tcw -> Twc
 	for (int i = 0; i < frame_num; i++)
 	{
 		q[i].w() = c_rotation[i][0]; 

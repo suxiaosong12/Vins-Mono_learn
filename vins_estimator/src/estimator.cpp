@@ -297,17 +297,18 @@ bool Estimator::initialStructure()
 
     
     // 用于视觉初始化的图像特征点数据
-    vector<SFMFeature> sfm_f;
+    vector<SFMFeature> sfm_f;  // 保存每个特征点的信息
     for (auto &it_per_id : f_manager.feature)
     {
-        int imu_j = it_per_id.start_frame - 1;
-        SFMFeature tmp_feature;
+        int imu_j = it_per_id.start_frame - 1;  // 这个跟imu无关，就是存储观测特征点的帧的索引
+        SFMFeature tmp_feature;  // 用来后续做sfm
         tmp_feature.state = false; // 该特征点的初始状态为：未被三角化
         tmp_feature.id = it_per_id.feature_id;
         for (auto &it_per_frame : it_per_id.feature_per_frame)
         {
             imu_j++; // 观测到该特征点的图像帧的帧号
             Vector3d pts_j = it_per_frame.point;
+            // 索引以及各自坐标系下的坐标
             tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));
         }
         sfm_f.push_back(tmp_feature);
@@ -336,7 +337,8 @@ bool Estimator::initialStructure()
         return false;
     }
 
-    //solve pnp for all frame
+    // solve pnp for all frame
+    // 只是针对KF进行sfm，初始化需要all_image_frame中的所有元素，因此下面通过KF来求解其他的非KF的位姿
     // 由于并不是第一次视觉初始化就能成功，此时图像帧数目有可能会超过滑动窗口的大小
     // 所以再视觉初始化的最后，要求出滑动窗口外的帧的位姿
     // 最后把世界坐标系从帧l的相机坐标系，转到帧l的IMU坐标系
@@ -344,16 +346,17 @@ bool Estimator::initialStructure()
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
-    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)
+    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)  // i代表跟这个帧最近的KF的索引
     {
         // provide initial guess
         cv::Mat r, rvec, t, D, tmp_r;
-
+        // 这一帧本身就是KF，因此可以直接得到位姿
         if((frame_it->first) == Headers[i].stamp.toSec()) // all_image_frame与滑动窗口中对应的帧
         {
             frame_it->second.is_key_frame = true; // 滑动窗口中所有帧都是关键帧
-            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose(); // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态（对应VINS Mono论文(2018年的期刊版论文)中的公式（6））。
-            frame_it->second.T = T[i];
+            // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态
+            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose(); // 得到Rwi
+            frame_it->second.T = T[i];  // 初始化不估计平移外参
             i++;
             continue;
         }
@@ -362,10 +365,10 @@ bool Estimator::initialStructure()
             i++;
         }
 
-        // 为滑动窗口外的帧提供一个初始位姿
+        // 为滑动窗口外的帧提供一个初始位姿,最近的KF提供一个初始值，Twc -> Tcw
         Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
         Vector3d P_inital = - R_inital * T[i];
-        cv::eigen2cv(R_inital, tmp_r);
+        cv::eigen2cv(R_inital, tmp_r);  // eigen -> cv
         cv::Rodrigues(tmp_r, rvec);
         cv::eigen2cv(P_inital, t);
 
@@ -375,14 +378,14 @@ bool Estimator::initialStructure()
         for (auto &id_pts : frame_it->second.points) // 对于该帧中的特征点
         {
             int feature_id = id_pts.first; // 特征点id
-            for (auto &i_p : id_pts.second) // 由于可能有多个相机，所以需要遍历。i_p对应着一个相机所拍图像帧的特征点信息
+            for (auto &i_p : id_pts.second) // 由于是单目，这里id_pts.second大小就是1。i_p对应着一个相机所拍图像帧的特征点信息
             {
                 it = sfm_tracked_points.find(feature_id);
                 // 如果it不是尾部迭代器，说明在sfm_tracked_points中找到了相应的3D点
-                if(it != sfm_tracked_points.end()) 
+                if(it != sfm_tracked_points.end()) // 有对应的三角化出来的3d点
                 {
                     // 记录该id特征点的3D位置
-                    Vector3d world_pts = it->second;
+                    Vector3d world_pts = it->second;  // 地图点的世界坐标
                     cv::Point3f pts_3(world_pts(0), world_pts(1), world_pts(2));
                     pts_3_vector.push_back(pts_3);
 
@@ -407,6 +410,7 @@ bool Estimator::initialStructure()
         }
 
         // pnp求解成功
+        // cv -> eigen,同时Tcw -> Twc
         cv::Rodrigues(rvec, r);
         MatrixXd R_pnp,tmp_R_pnp;
         cv::cv2eigen(r, tmp_R_pnp);
@@ -414,6 +418,8 @@ bool Estimator::initialStructure()
         MatrixXd T_pnp;
         cv::cv2eigen(t, T_pnp);
         T_pnp = R_pnp * (-T_pnp);
+        // Twc -> Twi
+        // 由于尺度未恢复，因此平移暂时不转到imu系
         frame_it->second.R = R_pnp * RIC[0].transpose(); // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态。
         frame_it->second.T = T_pnp; 
     }
@@ -512,15 +518,22 @@ bool Estimator::visualInitialAlign()
     return true;
 }
 
+/*
+从最开始一帧向后扫描
+首先判断与最后一帧的匹配点是不是足够多
+然后判断视差是不是足够大
+调用solveRelativeRT，如果内点足够多，则该帧是枢纽帧
+*/
 // 在滑动窗口中，寻找与最新帧有足够多数量的特征点对应关系和视差的帧，然后用5点法恢复相对位姿
 bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
     // find previous frame which contians enough correspondance and parallex with newest frame
+    // 优先从最前面开始
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
         corres = f_manager.getCorresponding(i, WINDOW_SIZE);
-        if (corres.size() > 20)
+        if (corres.size() > 20)  // 要求共视的特征点足够多
         {
             double sum_parallax = 0;
             double average_parallax;
@@ -528,11 +541,12 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
             {
                 Vector2d pts_0(corres[j].first(0), corres[j].first(1));
                 Vector2d pts_1(corres[j].second(0), corres[j].second(1));
-                double parallax = (pts_0 - pts_1).norm();
+                double parallax = (pts_0 - pts_1).norm();  // 计算了视差
                 sum_parallax = sum_parallax + parallax;
 
             }
-            average_parallax = 1.0 * sum_parallax / int(corres.size());
+            average_parallax = 1.0 * sum_parallax / int(corres.size());  // 计算每个特征点的平均视差
+            // 有足够的视差在通过本质矩阵恢复第i帧和最后一帧之间的 R t T_i_last
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
             {
                 l = i;
