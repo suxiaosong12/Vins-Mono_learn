@@ -8,12 +8,13 @@ InitialEXRotation::InitialEXRotation(){
     ric = Matrix3d::Identity();
 }
 
+// 标定imu和相机之间的旋转外参，通过imu和图像计算的旋转使用手眼标定计算获得
 bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> corres, Quaterniond delta_q_imu, Matrix3d &calib_ric_result)
 {
     frame_count++;
-    Rc.push_back(solveRelativeR(corres));
-    Rimu.push_back(delta_q_imu.toRotationMatrix());
-    Rc_g.push_back(ric.inverse() * delta_q_imu * ric);
+    Rc.push_back(solveRelativeR(corres));  // 通过对极约束计算旋转
+    Rimu.push_back(delta_q_imu.toRotationMatrix());  // 帧间IMU的R，由IMU预积分得到
+    Rc_g.push_back(ric.inverse() * delta_q_imu * ric);  // ric是上一次求解得到的外参
 
     Eigen::MatrixXd A(frame_count * 4, 4);
     A.setZero();
@@ -26,11 +27,13 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         double angular_distance = 180 / M_PI * r1.angularDistance(r2);
         ROS_DEBUG(
             "%d %f", i, angular_distance);
-
-        double huber = angular_distance > 5.0 ? 5.0 / angular_distance : 1.0;
+        // huber核函数做加权
+        double huber = angular_distance > 5.0 ? 5.0 / angular_distance : 1.0;  // 权重计算
         ++sum_ok;
         Matrix4d L, R;
-
+        //R_bk+1^bk * R_c^b = R_c^b * R_ck+1^ck
+        //[Q1(q_bk+1^bk) - Q2(q_ck+1^ck)] * q_c^b = 0
+        //L R 分别为左乘和右乘矩阵
         double w = Quaterniond(Rc[i]).w();
         Vector3d q = Quaterniond(Rc[i]).vec();
         L.block<3, 3>(0, 0) = w * Matrix3d::Identity() + Utility::skewSymmetric(q);
@@ -46,9 +49,9 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
         R.block<1, 3>(3, 0) = -q.transpose();
         R(3, 3) = w;
 
-        A.block<4, 4>((i - 1) * 4, 0) = huber * (L - R);
+        A.block<4, 4>((i - 1) * 4, 0) = huber * (L - R);   // 作用在残差上面
     }
-
+    // svd分解中最小奇异值对应的右奇异向量作为旋转四元数
     JacobiSVD<MatrixXd> svd(A, ComputeFullU | ComputeFullV);
     Matrix<double, 4, 1> x = svd.matrixV().col(3);
     Quaterniond estimated_R(x);
@@ -56,8 +59,8 @@ bool InitialEXRotation::CalibrationExRotation(vector<pair<Vector3d, Vector3d>> c
     //cout << svd.singularValues().transpose() << endl;
     //cout << ric << endl;
     Vector3d ric_cov;
-    ric_cov = svd.singularValues().tail<3>();
-    if (frame_count >= WINDOW_SIZE && ric_cov(1) > 0.25)
+    ric_cov = svd.singularValues().tail<3>();  // 取出尾部最小的三个奇异值
+    if (frame_count >= WINDOW_SIZE && ric_cov(1) > 0.25)  // 至少迭代计算了WINDOW_SIZE次，且R的奇异值大于0.25才认为标定成功
     {
         calib_ric_result = ric;
         return true;

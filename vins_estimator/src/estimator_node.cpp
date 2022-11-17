@@ -265,9 +265,9 @@ void process()
                  {  // 匿名函数，隐式引用捕获外部变量
                     return (measurements = getMeasurements()).size() != 0;
                  });
-        lk.unlock(); // 从缓存队列中读取数据完成，解锁
+        lk.unlock();  // 从缓存队列中读取数据完成，数据buffer的锁解锁，回调可以继续塞数据了
 
-        m_estimator.lock();
+        m_estimator.lock();  // 进行后端求解，不能和复位重启冲突
         for (auto &measurement : measurements)  // 遍历measurements中的每一个measurement (IMUs,IMG)组合
         {
             auto img_msg = measurement.second;
@@ -361,10 +361,17 @@ void process()
 
             ROS_DEBUG("processing vision data with stamp %f \n", img_msg->header.stamp.toSec());
             TicToc t_s;
-
-            // 将图像特征点数据存到一个map容器中，key是feature_id
-            // value值是一个vector，如果系统是多目的，那么同一个特征点在不同摄像头下会有不同的观测信息，那么这个vector，就是存储着某个特征点在所有摄像头上的信息。对于VINS-mono来说，value它不是vector，仅仅是一个pair
+     
+     
             map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> image;
+            /*
+            1、虽然它叫image，但是这个容器里面存放的信息是每一个特征点的！
+            2、索引值是feature_id；
+            3、value值是一个vector，如果系统是多目的，那么同一个特征点在不同摄像头下会有不同的观测信息，
+                那么这个vector，就是存储着某个特征点在所有摄像头上的信息。对于VINS-mono来说，value它不是vector，仅仅是一个pair
+            4、接下来看这个vector里面的每一pair。int对应的是camera_id，告诉我们这些数据是当前特征点在哪个摄像头上获得的。
+            5、Matrix<double, 7, 1>是一个7维向量，依次存放着当前feature_id的特征点在camera_id的相机中的归一化坐标，像素坐标和像素运动速度
+            */
 
             // 遍历img_msg里面的每一个特征点的归一化坐标
             for (unsigned int i = 0; i < img_msg->points.size(); i++)

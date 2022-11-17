@@ -149,18 +149,23 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     Headers[frame_count] = header;
 
     // 将图像数据、时间、临时预积分值存到图像帧类中
-    // imageframe是ImageFrame的一个实例。用于融合IMU和视觉信息的数据结构，包括了某一帧的全部信息:位姿，特征点信息，预积分信息，是否是关键帧等。
+    // imageframe用于融合IMU和视觉信息的数据结构，包括了某一帧的全部信息:位姿，特征点信息，预积分信息，是否是关键帧等。
+    // all_image_frame用来做初始化相关操作，他保留滑窗起始到当前的所有帧
+    // 有一些帧会因为不是KF，被MARGIN_SECOND_NEW，但是即使较新的帧被margin，他也会保留在这个容器中，因为初始化要求使用所有的帧，而非只要KF
     ImageFrame imageframe(image, header.stamp.toSec());
     imageframe.pre_integration = tmp_pre_integration;
+    // 这里就是简单的把图像和预积分绑定在一起，这里预积分就是两帧之间的，滑窗中实际上是两个KF之间的
+    // 实际上是准备用来初始化的相关数据
     all_image_frame.insert(make_pair(header.stamp.toSec(), imageframe)); // 每读取一帧图像特征点数据，都会存入all_image_frame
     tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};  // 更新临时预积分初始值
 
-    // 相机与IMU外参的在线标定
+    // 如果没有外参初值，则采用旋转外参初始化
     if(ESTIMATE_EXTRINSIC == 2)
     {
         ROS_INFO("calibrating extrinsic param, rotation movement is needed");
         if (frame_count != 0)
         {
+            // 调用getCorresponding获取frame_count和frame_count-1帧的匹配点
             vector<pair<Vector3d, Vector3d>> corres = f_manager.getCorresponding(frame_count - 1, frame_count);
             Matrix3d calib_ric;
             if (initial_ex_rotation.CalibrationExRotation(corres, pre_integrations[frame_count]->delta_q, calib_ric))
@@ -169,7 +174,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
                 ROS_WARN_STREAM("initial extrinsic rotation: " << endl << calib_ric);
                 ric[0] = calib_ric;
                 RIC[0] = calib_ric;
-                ESTIMATE_EXTRINSIC = 1;
+                ESTIMATE_EXTRINSIC = 1;  // 标志位设置成可信的外参初值
             }
         }
     }
@@ -179,7 +184,8 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         if (frame_count == WINDOW_SIZE) // 滑动窗口中塞满了才进行初始化
         {
             bool result = false;
-            if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1) // 在上一次初始化失败后至少0.1秒才进行下一次初始化
+            // 要有可信的外参值，同时距离上次初始化不成功至少相邻0.1s
+            if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1)
             {
                result = initialStructure();
                initial_timestamp = header.stamp.toSec();
@@ -257,10 +263,12 @@ bool Estimator::initialStructure()
     {
         map<double, ImageFrame>::iterator frame_it;
         Vector3d sum_g;
+        // 从第二帧开始检查imu
         for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
         {
             double dt = frame_it->second.pre_integration->sum_dt;
             Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
+            // 累加每一帧带重力加速度的deltav
             sum_g += tmp_g;
         }
         Vector3d aver_g;
@@ -270,10 +278,10 @@ bool Estimator::initialStructure()
         {
             double dt = frame_it->second.pre_integration->sum_dt;
             Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-            var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);
+            var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);  // 求方差
             //cout << "frame g " << tmp_g.transpose() << endl;
         }
-        var = sqrt(var / ((int)all_image_frame.size() - 1));
+        var = sqrt(var / ((int)all_image_frame.size() - 1));  // 得到的标准差
         //ROS_WARN("IMU variation %f!", var);
         if(var < 0.25)
         {

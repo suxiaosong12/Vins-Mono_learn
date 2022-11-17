@@ -63,7 +63,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     // feature容器按照特征点id组织特征点数据，对于每个id的特征点，记录它被滑动窗口中哪些图像帧观测到了
     for (auto &id_pts : image)
     {
-        FeaturePerFrame f_per_fra(id_pts.second[0].second, td);
+        FeaturePerFrame f_per_fra(id_pts.second[0].second, td);  // 用特征点信息构造一个对象
 
         int feature_id = id_pts.first;
 
@@ -74,7 +74,7 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
          */
         auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
                           {
-            return it.feature_id == feature_id;
+            return it.feature_id == feature_id;  // 在已有的id中寻找是否是有相同的特征点
                           });
 
         // 返回尾部迭代器，说明该特征点第一次出现（在当前帧中新检测的特征点），需要在feature中新建一个FeaturePerId对象
@@ -86,19 +86,19 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
         else if (it->feature_id == feature_id)
         {
             it->feature_per_frame.push_back(f_per_fra);
-            last_track_num++; // 当前帧（第1最新帧）图像跟踪到的特征点的数量
+            last_track_num++;  // 追踪到上一帧的特征点数目
         }
     }
 
-    // 1. 当前帧的帧号小于2，即为0或1，为0，则没有第2最新帧，为1，则第2最新帧是滑动窗口中的第1帧
-    // 2. 当前帧（第1最新帧）跟踪到的特征点数量小于20（？？？为什么当前帧的跟踪质量不好，就把第2最新帧当作关键帧？？？）
-    // 出现以上2种情况的任意一种，则认为第2最新帧是关键帧
+    // 前两帧都设置为KF，追踪过少也认为是KF
     if (frame_count < 2 || last_track_num < 20)
-        return true; // 第2最新帧是关键帧
+        return true;
 
     // 计算第2最新帧和第3最新帧之间跟踪到的特征点的平均视差
     for (auto &it_per_id : feature)
     {
+        // 计算的实际上是frame_count-1,也就是前一帧是否为关键帧
+        // 因此起始帧至少得是frame_count - 2,同时至少覆盖到frame_count - 1帧
         if (it_per_id.start_frame <= frame_count - 2 &&
             it_per_id.start_frame + int(it_per_id.feature_per_frame.size()) - 1 >= frame_count - 1)
         {
@@ -146,22 +146,23 @@ void FeatureManager::debugShow()
     }
 }
 
+// 获取frame_count和frame_count-1帧的匹配点
 vector<pair<Vector3d, Vector3d>> FeatureManager::getCorresponding(int frame_count_l, int frame_count_r)
 {
     vector<pair<Vector3d, Vector3d>> corres;
     for (auto &it : feature)
     {
-        if (it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r)
+        if (it.start_frame <= frame_count_l && it.endFrame() >= frame_count_r)  // 保证需要的特征点被这两帧都观察到
         {
             Vector3d a = Vector3d::Zero(), b = Vector3d::Zero();
-            int idx_l = frame_count_l - it.start_frame;
+            int idx_l = frame_count_l - it.start_frame;  // 获得在feature_per_frame中的索引
             int idx_r = frame_count_r - it.start_frame;
 
             a = it.feature_per_frame[idx_l].point;
 
             b = it.feature_per_frame[idx_r].point;
             
-            corres.push_back(make_pair(a, b));
+            corres.push_back(make_pair(a, b));  // 返回相机坐标系下的坐标对
         }
     }
     return corres;
@@ -400,7 +401,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     const FeaturePerFrame &frame_i = it_per_id.feature_per_frame[frame_count - 2 - it_per_id.start_frame]; // 第3最新帧
     const FeaturePerFrame &frame_j = it_per_id.feature_per_frame[frame_count - 1 - it_per_id.start_frame]; // 第2最新帧
 
-    double ans = 0;// 初始化视差
+    double ans = 0;  // 初始化视差
 
     // 以下的操作暂时没有看懂
     Vector3d p_j = frame_j.point;
@@ -418,7 +419,7 @@ double FeatureManager::compensatedParallax2(const FeaturePerId &it_per_id, int f
     double dep_i = p_i(2);
     double u_i = p_i(0) / dep_i;
     double v_i = p_i(1) / dep_i;
-    double du = u_i - u_j, dv = v_i - v_j;
+    double du = u_i - u_j, dv = v_i - v_j;  // 归一化相机坐标系的坐标差
 
     double dep_i_comp = p_i_comp(2);
     double u_i_comp = p_i_comp(0) / dep_i_comp;
