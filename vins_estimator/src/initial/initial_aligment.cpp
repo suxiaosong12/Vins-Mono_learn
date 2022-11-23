@@ -4,16 +4,16 @@
 //根据视觉SFM的结果来校正陀螺仪的Bias，注意得到了新的Bias后对应的预积分需要repropagate
 void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
 {
-    Matrix3d A;
+    Matrix3d A;  // A和b对应的是Ax=b,采用LDLT分解
     Vector3d b;
     Vector3d delta_bg;
     A.setZero();
     b.setZero();
     map<double, ImageFrame>::iterator frame_i;
-    map<double, ImageFrame>::iterator frame_j;
+    map<double, ImageFrame>::iterator frame_j;  // frame_i和frame_j分别读取all_image_frame中的相邻两帧
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++)
     {
-        frame_j = next(frame_i);
+        frame_j = next(frame_i);  // 构造Ax=b等式
         MatrixXd tmp_A(3, 3);
         tmp_A.setZero();
         VectorXd tmp_b(3);
@@ -25,13 +25,13 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         b += tmp_A.transpose() * tmp_b;
 
     }
-    delta_bg = A.ldlt().solve(b);
+    delta_bg = A.ldlt().solve(b);  // 采用LDLT分解，求解Ax = b
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
-    for (int i = 0; i <= WINDOW_SIZE; i++)
+    for (int i = 0; i <= WINDOW_SIZE; i++)  // 给滑窗内的IMU预积分加入角速度bias
         Bgs[i] += delta_bg;
 
-    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)
+    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)  // 重新计算所有帧的IMU积分
     {
         frame_j = next(frame_i);
         frame_j->second.pre_integration->repropagate(Vector3d::Zero(), Bgs[0]);
