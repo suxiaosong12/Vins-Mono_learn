@@ -15,11 +15,11 @@ using namespace std;
 
 struct SFMFeature
 {
-    bool state;
-    int id;
-    vector<pair<int,Vector2d>> observation;
-    double position[3];
-    double depth;
+    bool state;  // 特征点的状态（是否被三角化）
+    int id;  // 特征点id
+    vector<pair<int,Vector2d>> observation;  // 所有共视到该特在点的图像帧ID和图像坐标
+    double position[3];  // 3d坐标
+    double depth;  // 深度
 };
 
 struct ReprojectionError3D

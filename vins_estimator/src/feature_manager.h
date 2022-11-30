@@ -15,7 +15,7 @@ using namespace Eigen;
 
 #include "parameters.h"
 
-class FeaturePerFrame  // 每帧基本的数据：特征点[x,y,z,u,v,vx,vy]和td(IMU与cam同步时间差)
+class FeaturePerFrame  // 存储一个特征点在每帧图像中的一些属性，特征点[x,y,z,u,v,vx,vy]和td(IMU与cam同步时间差)
 {
   public:
     FeaturePerFrame(const Eigen::Matrix<double, 7, 1> &_point, double td)
@@ -41,7 +41,7 @@ class FeaturePerFrame  // 每帧基本的数据：特征点[x,y,z,u,v,vx,vy]和t
     double dep_gradient;
 };
 
-class FeaturePerId  // 某feature_id下的所有FeaturePerFrame
+class FeaturePerId  // 这个类的对象是一个特征点对象，存储所有共视到到该特征点的的特征图像帧对象FeaturePerFrame
 {
   public:
     const int feature_id;  // 特征点ID索引

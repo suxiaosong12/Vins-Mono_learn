@@ -2,6 +2,7 @@
 
 //see V-B-1 in Paper
 //根据视觉SFM的结果来校正陀螺仪的Bias，注意得到了新的Bias后对应的预积分需要repropagate
+//求解IMU偏移思路：IMU预计分增量 = SFM相邻位姿变换
 void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
 {
     Matrix3d A;  // A和b对应的是Ax=b,采用LDLT分解
@@ -28,7 +29,7 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
     delta_bg = A.ldlt().solve(b);  // 采用LDLT分解，求解Ax = b
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
-    for (int i = 0; i <= WINDOW_SIZE; i++)  // 给滑窗内的IMU预积分加入角速度bias
+    for (int i = 0; i <= WINDOW_SIZE; i++)  // 因为求得的delta_bg是变化量，所以需要在滑窗内累加得到偏移准确值
         Bgs[i] += delta_bg;
 
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)  // 重新计算所有帧的IMU积分
@@ -61,8 +62,8 @@ MatrixXd TangentBasis(Vector3d &g0)
 //2.然后迭代求得w1,w2
 void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
-    Vector3d g0 = g.normalized() * G.norm();
-    Vector3d lx, ly;
+    Vector3d g0 = g.normalized() * G.norm();  // g0 = (g^-)*||g||//乘以G的模值那么得到gc0方向上的模值
+    Vector3d lx, ly;  //论文中w1,w2
     //VectorXd x;
     int all_frame_count = all_image_frame.size();
     int n_state = all_frame_count * 3 + 2 + 1;
@@ -74,9 +75,9 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
 
     map<double, ImageFrame>::iterator frame_i;
     map<double, ImageFrame>::iterator frame_j;
-    for(int k = 0; k < 4; k++)
+    for(int k = 0; k < 4; k++)  // 迭代4次
     {
-        MatrixXd lxly(3, 2);
+        MatrixXd lxly(3, 2);  // lxly = b = [b1,b2]
         lxly = TangentBasis(g0);
         int i = 0;
         for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
@@ -89,7 +90,10 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
             tmp_b.setZero();
 
             double dt = frame_j->second.pre_integration->sum_dt;
-
+            // tmp_A(6,9) = [-I*dt           0             (R^bk_c0)*dt*dt*b/2   (R^bk_c0)*((p^c0_ck+1)-(p^c0_ck))  ] 
+            //              [ -I    (R^bk_c0)*(R^c0_bk+1)      (R^bk_c0)*dt*b                  0                    ]
+            // tmp_b(6,1) = [ (a^bk_bk+1)+(R^bk_c0)*(R^c0_bk+1)*p^b_c-p^b_c - (R^bk_c0)*dt*dt*||g||*(g^-)/2 , (b^bk_bk+1)-(R^bk_c0)dt*||g||*(g^-)]^T
+            // tmp_A * x = tmp_b 求解最小二乘问题
 
             tmp_A.block<3, 3>(0, 0) = -dt * Matrix3d::Identity();
             tmp_A.block<3, 2>(0, 6) = frame_i->second.R.transpose() * dt * dt / 2 * Matrix3d::Identity() * lxly;
@@ -121,8 +125,10 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
         }
             A = A * 1000.0;
             b = b * 1000.0;
-            x = A.ldlt().solve(b);
-            VectorXd dg = x.segment<2>(n_state - 3);
+            x = A.ldlt().solve(b);  // ldlt分解，得到优化后的状态量x
+            VectorXd dg = x.segment<2>(n_state - 3);  // dg = [w1,w2]^T
+            //每次normalized（）之后 (g0 + lxly * dg).normalized()  即为每次迭代后得到b1 b2后，只更新重力方向，不更新模值
+            // 模值仍然是G.norm()；但是方向更新为g0 + lxly * dg
             g0 = (g0 + lxly * dg).normalized() * G.norm();
             //double s = x(n_state - 1);
     }   
@@ -135,14 +141,14 @@ void RefineGravity(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vector
 bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, VectorXd &x)
 {
     int all_frame_count = all_image_frame.size();
-    int n_state = all_frame_count * 3 + 3 + 1;
+    int n_state = all_frame_count * 3 + 3 + 1;  // 需要优化的状态量个数
 
     MatrixXd A{n_state, n_state};
     A.setZero();
     VectorXd b{n_state};
     b.setZero();
 
-    map<double, ImageFrame>::iterator frame_i;
+    map<double, ImageFrame>::iterator frame_i;  // frame_i和frame_j分别读入all_frame_count中的相邻两帧
     map<double, ImageFrame>::iterator frame_j;
     int i = 0;
     for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end(); frame_i++, i++)
@@ -186,12 +192,12 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
     }
     A = A * 1000.0;
     b = b * 1000.0;
-    x = A.ldlt().solve(b);
+    x = A.ldlt().solve(b);  // ldlt分解把x偏大的100矫正
     double s = x(n_state - 1) / 100.0;
     ROS_DEBUG("estimated scale: %f", s);
     g = x.segment<3>(n_state - 4);
     ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());
-    if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)
+    if(fabs(g.norm() - G.norm()) > 1.0 || s < 0)  // 如果重力加速度与参考值差距过大或者尺度为负数，则说明计算错误
     {
         return false;
     }
