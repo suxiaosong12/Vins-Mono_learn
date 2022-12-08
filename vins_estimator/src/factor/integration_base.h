@@ -175,7 +175,7 @@ class IntegrationBase
         Eigen::Matrix3d dv_dba = jacobian.block<3, 3>(O_V, O_BA);  // 6,9
         Eigen::Matrix3d dv_dbg = jacobian.block<3, 3>(O_V, O_BG);  // 6,12
 
-        Eigen::Vector3d dba = Bai - linearized_ba;
+        Eigen::Vector3d dba = Bai - linearized_ba;  // linearized_ba和linearized_bg可以看做优化前的状态量
         Eigen::Vector3d dbg = Bgi - linearized_bg;
 
         Eigen::Quaterniond corrected_delta_q = delta_q * Utility::deltaQ(dq_dbg * dbg);

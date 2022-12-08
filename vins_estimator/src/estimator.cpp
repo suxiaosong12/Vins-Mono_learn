@@ -187,17 +187,17 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
             // 要有可信的外参值，同时距离上次初始化不成功至少相邻0.1s
             if( ESTIMATE_EXTRINSIC != 2 && (header.stamp.toSec() - initial_timestamp) > 0.1)
             {
-               result = initialStructure();
-               initial_timestamp = header.stamp.toSec();
+               result = initialStructure();  // 执行视觉惯性联合初始化
+               initial_timestamp = header.stamp.toSec();  // 更新初始化时间戳
             }
-            if(result) // 初始化操作成功
+            if(result) // 初始化操作成功，执行一次非线性优化
             {
                 solver_flag = NON_LINEAR;
                 solveOdometry(); // 紧耦合优化
                 slideWindow(); // 对窗口进行滑动
                 f_manager.removeFailures(); // 去除滑出了滑动窗口的特征点
                 ROS_INFO("Initialization finish!");
-                last_R = Rs[WINDOW_SIZE];
+                last_R = Rs[WINDOW_SIZE];  // 得到当前帧与第一帧的位姿
                 last_P = Ps[WINDOW_SIZE];
                 last_R0 = Rs[0];
                 last_P0 = Ps[0];
@@ -259,11 +259,11 @@ bool Estimator::initialStructure()
 {
     TicToc t_sfm;
     //check imu observibility
-    // 1.通过重力variance确保IMU有足够的excitation
+    // 1.通过计算滑窗内所有帧的线加速度的标准差，判断IMU是否有充分运动激励，以判断是否进行初始化
     {
         map<double, ImageFrame>::iterator frame_it;
         Vector3d sum_g;
-        // 从第二帧开始检查imu
+        // 从第二帧开始检查imu.第一次循环，求出滑窗内的平均线加速度
         for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
         {
             double dt = frame_it->second.pre_integration->sum_dt;
@@ -274,6 +274,7 @@ bool Estimator::initialStructure()
         Vector3d aver_g;
         aver_g = sum_g * 1.0 / ((int)all_image_frame.size() - 1);
         double var = 0;
+        // 第二次循环，求出滑窗内的线加速度的标准差
         for (frame_it = all_image_frame.begin(), frame_it++; frame_it != all_image_frame.end(); frame_it++)
         {
             double dt = frame_it->second.pre_integration->sum_dt;
@@ -291,34 +292,35 @@ bool Estimator::initialStructure()
     }
 
     // global sfm
-    Quaterniond Q[frame_count + 1]; // 滑动窗口中每一帧的姿态
+    Quaterniond Q[frame_count + 1]; // 滑动窗口中每一帧的姿态。因为滑窗的容量为10，再加上当前最新帧，所以需要存储11帧的值
     Vector3d T[frame_count + 1]; // 滑动窗口中每一帧的位置
     map<int, Vector3d> sfm_tracked_points;
 
     
     // 用于视觉初始化的图像特征点数据
-    vector<SFMFeature> sfm_f;  // 保存每个特征点的信息
-    for (auto &it_per_id : f_manager.feature)
+    vector<SFMFeature> sfm_f;  // 定义一个容器来保存每个特征点的信息
+    for (auto &it_per_id : f_manager.feature)  // 滑窗中出现的所有特征点
     {
         int imu_j = it_per_id.start_frame - 1;  // 这个跟imu无关，就是存储观测特征点的帧的索引
-        SFMFeature tmp_feature;  // 用来后续做sfm
-        tmp_feature.state = false; // 该特征点的初始状态为：未被三角化
+        SFMFeature tmp_feature;
+        tmp_feature.state = false;
         tmp_feature.id = it_per_id.feature_id;
-        for (auto &it_per_frame : it_per_id.feature_per_frame)
+        for (auto &it_per_frame : it_per_id.feature_per_frame)  // 对于当前特征点，在每一帧的坐标
         {
             imu_j++; // 观测到该特征点的图像帧的帧号
-            Vector3d pts_j = it_per_frame.point;
+            Vector3d pts_j = it_per_frame.point;  // 当前特征点在编号为imu_j++的帧里的归一化坐标
             // 索引以及各自坐标系下的坐标
-            tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));
-        }
+            tmp_feature.observation.push_back(make_pair(imu_j, Eigen::Vector2d{pts_j.x(), pts_j.y()}));  // 把当前特征在当前帧的坐标和当前帧的编号配上对
+        }   // tmp_feature.observation里面存放着的一直是同一个特征，每一个pair是这个特征在 不同帧号 中的 归一化坐标
         sfm_f.push_back(tmp_feature);
     } 
 
 
-    Matrix3d relative_R; // 从最新帧到选定帧的旋转（我推测的）
-    Vector3d relative_T; // 从最新帧到选定帧的位移（我推测的）
+    Matrix3d relative_R; // 从最新帧到选定帧的旋转
+    Vector3d relative_T; // 从最新帧到选定帧的位移
     int l; // 选定帧在滑动窗口中的帧号
-    // 2.选择跟最新帧中有足够数量的特征点跟踪和视差的某一帧，利用五点法恢复相对旋转和平移量 
+
+    // 2.在滑窗(0-9)中找到第一个满足要求的帧(第l帧)，它与最新一帧(frame_count=10)有足够的共视点和视差，并求出这两帧之间的相对位置变化关系
     // 如果找不到，则初始化失败
     if (!relativePose(relative_R, relative_T, l))
     {

@@ -17,7 +17,7 @@ struct SFMFeature
 {
     bool state;  // 特征点的状态（是否被三角化）
     int id;  // 特征点id
-    vector<pair<int,Vector2d>> observation;  // 所有共视到该特在点的图像帧ID和图像坐标
+    vector<pair<int,Vector2d>> observation;  // 所有观测到该特征点的 图像帧ID 和 该特征点在这个图像帧的归一化坐标
     double position[3];  // 3d坐标
     double depth;  // 深度
 };
