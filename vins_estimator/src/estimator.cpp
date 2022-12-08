@@ -316,14 +316,14 @@ bool Estimator::initialStructure()
     } 
 
 
-    Matrix3d relative_R; // 从最新帧到选定帧的旋转
-    Vector3d relative_T; // 从最新帧到选定帧的位移
+    Matrix3d relative_R; // 从最新帧到选定帧(第l帧)的旋转
+    Vector3d relative_T; // 从最新帧到选定帧(第l帧)的位移
     int l; // 选定帧在滑动窗口中的帧号
 
     // 2.在滑窗(0-9)中找到第一个满足要求的帧(第l帧)，它与最新一帧(frame_count=10)有足够的共视点和视差，并求出这两帧之间的相对位置变化关系
     // 如果找不到，则初始化失败
     if (!relativePose(relative_R, relative_T, l))
-    {
+    {// 这里的第L帧是从第一帧开始到滑动窗口中第一个满足与当前帧的平均视差足够大的帧l，会作为 参考帧 到下面的全局sfm使用，得到的Rt为当前帧到第l帧的坐标系变换Rt
         ROS_INFO("Not enough features or parallax; Move device around");
         return false;
     }
@@ -527,6 +527,7 @@ bool Estimator::visualInitialAlign()
 调用solveRelativeRT，如果内点足够多，则该帧是枢纽帧
 */
 // 在滑动窗口中，寻找与最新帧有足够多数量的特征点对应关系和视差的帧，然后用5点法恢复相对位姿
+// 计算滑窗内的每一帧(0-9)与最新一帧(10)之间的视差，直到找出第一个满足要求的帧，作为我们的第l帧；
 bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
 {
     // find previous frame which contians enough correspondance and parallex with newest frame
@@ -534,7 +535,8 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
     for (int i = 0; i < WINDOW_SIZE; i++)
     {
         vector<pair<Vector3d, Vector3d>> corres;
-        corres = f_manager.getCorresponding(i, WINDOW_SIZE);
+        corres = f_manager.getCorresponding(i, WINDOW_SIZE);  // 寻找第i帧到窗口最后一帧(最新帧)的对应特征点归一化坐标
+        // getCorresponding()的作用就是找到当前帧与最新一帧所有特征点在对应2帧下分别的归一化坐标，并配对，以供求出相对位姿时使用
         if (corres.size() > 20)  // 要求共视的特征点足够多
         {
             double sum_parallax = 0;
@@ -549,15 +551,16 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
             }
             average_parallax = 1.0 * sum_parallax / int(corres.size());  // 计算每个特征点的平均视差
             // 有足够的视差在通过本质矩阵恢复第i帧和最后一帧之间的 R t T_i_last
-            if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T))
-            {
+            if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T)) // 判断是否满足初始化条件：视差>30
+            {  // solveRelativeRT()通过基础矩阵计算当前帧与第l帧之间的R和T,并判断内点数目是否足够
+                // 一旦这一帧与当前帧视差足够大了，那么就不再继续找下去了(再找只会和当前帧的视差越来越小）
                 l = i;
                 ROS_DEBUG("average_parallax %f choose l %d and newest frame to triangulate the whole structure", average_parallax * 460, l);
                 return true;
             }
         }
     }
-    return false;
+    return false;  // 没有满足要求的帧，初始化失败
 }
 
 void Estimator::solveOdometry()

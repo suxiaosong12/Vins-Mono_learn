@@ -127,10 +127,10 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
  * Quaterniond* q： 一个数组指针，数组中需要存储滑动窗口中所有帧的姿态
  * Vector3d* T： 一个数组指针，数组中需要存储滑动窗口中所有帧的位置
  * int l： 在滑动窗口中找到的与最新帧做5点法的帧的帧号
- * const Matrix3d relative_R： 从最新帧到第l帧的旋转（个人推断）
- * const Vector3d relative_T： 从最新帧到第l帧的位移（个人推断）
+ * const Matrix3d relative_R： 从最新帧到第l帧的旋转
+ * const Vector3d relative_T： 从最新帧到第l帧的位移
  * vector<SFMFeature> &sfm_f： 用于视觉初始化的特征点数据
- * map<int, Vector3d> &sfm_tracked_points： shenmegui???
+ * map<int, Vector3d> &sfm_tracked_points
  */
 bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 			  const Matrix3d relative_R, const Vector3d relative_T,
@@ -141,7 +141,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 
 	// have relative_r relative_t
 	// intial two view
-	// 把relativePose找到的第l帧（是字母l，不是数字1，l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置，最后一帧的pose为relative_R,relative_T
+	// 把relativePose()找到的第l帧（l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置，最后一帧的pose为relative_R,relative_T
 	// 第l帧的姿态设置为一个没有任何旋转的实单位四元数
 	// 枢纽帧设置为单位帧，也可以理解为世界系原点
 	q[l].w() = 1;
@@ -158,8 +158,10 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	//cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
 	//cout << "init t_l " << T[l].transpose() << endl;
 
-	// 由于纯视觉slam处理都是Tcw,因此下面把Twc转成Tcw
 	//rotate to cam frame
+	// 构造容器，存储滑窗内 第l帧 相对于 其它帧 和 最新一帧 的位姿
+	// 这些容器存储的都是相对运动，大写的容器对应的是l帧旋转到各个帧。
+    // 小写的容器是用于全局BA时使用的，也同样是l帧旋转到各个帧。之所以在这两个地方要保存这种相反的旋转，是因为三角化求深度的时候需要这个相反旋转的矩阵
 	Matrix3d c_Rotation[frame_num];
 	Vector3d c_Translation[frame_num];
 	Quaterniond c_Quat[frame_num];
@@ -167,7 +169,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	double c_rotation[frame_num][4];
 	double c_translation[frame_num][3];
 
-	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧在世界坐标系（个人推断，一开始是把第l帧相机坐标系作为世界坐标系，注意是字母l，不是数字1）中的位姿
+	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧在世界坐标系（一开始是把第l帧相机坐标系作为世界坐标系）中的位姿
 
 	// 第l帧
 	// 将枢纽帧和最后一帧Twc转成Tcw，包括四元数，旋转矩阵，平移向量和增广矩阵
