@@ -3,11 +3,13 @@
 GlobalSFM::GlobalSFM(){}
 
 // 三角化恢复特征点3D位置
-// 参考 https://blog.csdn.net/u012101603/article/details/79714332
+// 参考 https://blog.csdn.net/jsf921942722/article/details/95511167
 void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matrix<double, 3, 4> &Pose1,
 						Vector2d &point0, Vector2d &point1, Vector3d &point_3d)
 {
 	Matrix4d design_matrix = Matrix4d::Zero();
+	//|-r1 + v * r2| 
+	//| r0 - u * r2|* X = 0, 一个归一化平面坐标x和变换矩阵可以构建两个关于X的线性方程组
 	design_matrix.row(0) = point0[0] * Pose0.row(2) - Pose0.row(0);
 	design_matrix.row(1) = point0[1] * Pose0.row(2) - Pose0.row(1);
 	design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
@@ -15,7 +17,7 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 	Vector4d triangulated_point;
 	triangulated_point =
 		      design_matrix.jacobiSvd(Eigen::ComputeFullV).matrixV().rightCols<1>(); // SVD分解
-	point_3d(0) = triangulated_point(0) / triangulated_point(3);
+	point_3d(0) = triangulated_point(0) / triangulated_point(3);  // 归一化
 	point_3d(1) = triangulated_point(1) / triangulated_point(3);
 	point_3d(2) = triangulated_point(2) / triangulated_point(3);
 }
@@ -92,13 +94,13 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 		{
 			if (sfm_f[j].observation[k].first == frame0) 
 			{
-				// frame0观测到了该特征点， 记录数据
+				// frame0观测到了该特征点，记录该特征点的坐标
 				point0 = sfm_f[j].observation[k].second;
 				has_0 = true;
 			}
 			if (sfm_f[j].observation[k].first == frame1)
 			{
-				// frame1观测到了该特征点， 记录数据
+				// frame1观测到了该特征点，记录该点的坐标
 				point1 = sfm_f[j].observation[k].second;
 				has_1 = true;
 			}
@@ -149,19 +151,19 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	q[l].y() = 0;
 	q[l].z() = 0;
 
-	// 第l帧位置向量设置为[0, 0, 0]
+	// 第l帧位置向量设置为[0, 0, 0],作为参考帧
 	T[l].setZero();
 
-	// 滑动窗口中最新帧到第l（字母l，不是数字1）的旋转和位移
-	q[frame_num - 1] = q[l] * Quaterniond(relative_R);  // 求得最后一帧的位姿
+	// 滑动窗口中最新帧相对于第l帧的旋转和位移，旋转增量右乘
+	q[frame_num - 1] = q[l] * Quaterniond(relative_R);
 	T[frame_num - 1] = relative_T;
 	//cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
 	//cout << "init t_l " << T[l].transpose() << endl;
 
 	//rotate to cam frame
-	// 构造容器，存储滑窗内 第l帧 相对于 其它帧 和 最新一帧 的位姿
+	// 构造容器，存储滑窗内 第l帧 相对于 其它帧 和 最新一帧 的变换矩阵
 	// 这些容器存储的都是相对运动，大写的容器对应的是l帧旋转到各个帧。
-    // 小写的容器是用于全局BA时使用的，也同样是l帧旋转到各个帧。之所以在这两个地方要保存这种相反的旋转，是因为三角化求深度的时候需要这个相反旋转的矩阵
+    // 小写的容器是用于全局BA时使用的，也同样是l帧旋转到各个帧。
 	Matrix3d c_Rotation[frame_num];
 	Vector3d c_Translation[frame_num];
 	Quaterniond c_Quat[frame_num];
@@ -169,20 +171,21 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	double c_rotation[frame_num][4];
 	double c_translation[frame_num][3];
 
-	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧在世界坐标系（一开始是把第l帧相机坐标系作为世界坐标系）中的位姿
+	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧相对于l的变换矩阵[R t]
 
+	// 之所以在这两个地方要保存这种相反的旋转，是因为三角化求深度的时候需要这个相反旋转的矩阵
 	// 第l帧
 	// 将枢纽帧和最后一帧Twc转成Tcw，包括四元数，旋转矩阵，平移向量和增广矩阵
-	c_Quat[l] = q[l].inverse(); // 四元数取逆（实际上就是共轭），相当于旋转矩阵取逆，得到从第l帧相机坐标系到第l帧相机坐标系的旋转
-	c_Rotation[l] = c_Quat[l].toRotationMatrix(); // 四元数转旋转矩阵
-	c_Translation[l] = -1 * (c_Rotation[l] * T[l]); // 从第l帧相机坐标系到第l帧相机坐标系的位移
+	c_Quat[l] = q[l].inverse(); // 四元数取逆
+	c_Rotation[l] = c_Quat[l].toRotationMatrix();
+	c_Translation[l] = -1 * (c_Rotation[l] * T[l]);
 	Pose[l].block<3, 3>(0, 0) = c_Rotation[l];
 	Pose[l].block<3, 1>(0, 3) = c_Translation[l];
 
 	// 滑动窗口中的最新帧
-	c_Quat[frame_num - 1] = q[frame_num - 1].inverse(); // 从第l帧相机坐标系到最新帧相机坐标系的旋转
+	c_Quat[frame_num - 1] = q[frame_num - 1].inverse();
 	c_Rotation[frame_num - 1] = c_Quat[frame_num - 1].toRotationMatrix();
-	c_Translation[frame_num - 1] = -1 * (c_Rotation[frame_num - 1] * T[frame_num - 1]); // 从第l帧相机坐标系到最新帧相机坐标系的位移
+	c_Translation[frame_num - 1] = -1 * (c_Rotation[frame_num - 1] * T[frame_num - 1]);
 	Pose[frame_num - 1].block<3, 3>(0, 0) = c_Rotation[frame_num - 1];
 	Pose[frame_num - 1].block<3, 1>(0, 3) = c_Translation[frame_num - 1];
 
@@ -193,7 +196,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	//以frame_num - 1为参考帧，根据第l和frame_num - 1帧的R,T，三角化一些点，然后再用PNP得到l+1到frame-1之间所有相对pose，然后恢复这些3D点
 	
 	/** 
-	 * 根据第l和frame_num - 1帧的R,T，三角化一些点（此时的世界坐标系，即参考坐标系，我推断应该是第l帧的相机坐标系）
+	 * 根据第l和frame_num - 1帧的R,T，三角化一些点
 	 * 从第l帧到第（frame_num - 2）帧：
 	 * 先通过pnp计算第i帧（i = l + 1, ..., frame_num - 2）的位姿（第l帧的位姿已经得到，不再计算）
 	 * 再调用triangulateTwoFrames()，与第frame_num - 1帧进行匹配，三角化一些点
