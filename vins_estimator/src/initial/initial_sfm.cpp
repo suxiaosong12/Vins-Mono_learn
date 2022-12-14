@@ -26,8 +26,8 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 								vector<SFMFeature> &sfm_f)
 {
-	vector<cv::Point2f> pts_2_vector; // 用于pnp解算的3D点
-	vector<cv::Point3f> pts_3_vector; // 用于pnp解算的2D点
+	vector<cv::Point2f> pts_2_vector; // 用于pnp解算的2D点
+	vector<cv::Point3f> pts_3_vector; // 用于pnp解算的3D点
 	for (int j = 0; j < feature_num; j++) // 遍历sfm_f中的特征点
 	{
 		if (sfm_f[j].state != true) // 如果该特征点未被三角化，则跳过该特征点
@@ -45,7 +45,7 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 				// 获取用于pnp解算的3D点
 				cv::Point3f pts_3(sfm_f[j].position[0], sfm_f[j].position[1], sfm_f[j].position[2]);
 				pts_3_vector.push_back(pts_3);
-				break; // 跳出内层循环
+				break; // 因为一个特征在帧i上只会出现一次，一旦找到了就没有必要再继续找了
 			}
 		}
 	}
@@ -55,8 +55,9 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 		if (int(pts_2_vector.size()) < 10) // 如果内点数量小于10，则认为无法完成pnp解算
 			return false;
 	}
+	//套用opencv公式求解pnp
 	cv::Mat r, rvec, t, D, tmp_r;
-	cv::eigen2cv(R_initial, tmp_r);
+	cv::eigen2cv(R_initial, tmp_r);  // 转换为solvePnP能处理的格式
 	cv::Rodrigues(tmp_r, rvec);
 	cv::eigen2cv(P_initial, t);
 	cv::Mat K = (cv::Mat_<double>(3, 3) << 1, 0, 0, 0, 1, 0, 0, 0, 1); // 似乎是因为2D点使用了归一化平面上的坐标，所以相机内参矩阵设置为单位阵
@@ -118,11 +119,6 @@ void GlobalSFM::triangulateTwoFrames(int frame0, Eigen::Matrix<double, 3, 4> &Po
 	}
 }
 
-// 	 q w_R_cam t w_R_cam
-//  c_rotation cam_R_w 
-//  c_translation cam_R_w
-// relative_q[i][j]  j_q_i
-// relative_t[i][j]  j_t_ji  (j < i)
 /**
  * 输入参数说明：
  * int frame_num： 滑动窗口中图像帧的数量，实际上就是WINDOW_SIZE + 1
@@ -320,7 +316,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		// fix设置的世界坐标系第l帧的位姿，同时fix最后一帧的位移用来fix尺度
 		if (i == l)
 		{
-			problem.SetParameterBlockConstant(c_rotation[i]);
+			problem.SetParameterBlockConstant(c_rotation[i]);  // SetParameterBlockConstant()函数是设置参数块为常数，不被优化
 		}
 		if (i == l || i == frame_num - 1)
 		{
@@ -354,6 +350,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	*/
 	ceres::Solver::Options options;
 	options.linear_solver_type = ceres::DENSE_SCHUR;
+	//shur消元有2大作用，一个是在最小二乘中利用H矩阵稀疏的性质进行加速求解，另一个是在sliding window时求解marg掉老帧后的先验信息矩阵
 	//options.minimizer_progress_to_stdout = true;
 	options.max_solver_time_in_seconds = 0.2;
 	ceres::Solver::Summary summary;

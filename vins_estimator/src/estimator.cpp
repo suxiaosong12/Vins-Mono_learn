@@ -279,10 +279,10 @@ bool Estimator::initialStructure()
         {
             double dt = frame_it->second.pre_integration->sum_dt;
             Vector3d tmp_g = frame_it->second.pre_integration->delta_v / dt;
-            var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);  // 求方差
+            var += (tmp_g - aver_g).transpose() * (tmp_g - aver_g);  // 求加速度的方差
             //cout << "frame g " << tmp_g.transpose() << endl;
         }
-        var = sqrt(var / ((int)all_image_frame.size() - 1));  // 得到的标准差
+        var = sqrt(var / ((int)all_image_frame.size() - 1));  // 得到加速度的标准差
         //ROS_WARN("IMU variation %f!", var);
         if(var < 0.25)
         {
@@ -543,16 +543,16 @@ bool Estimator::relativePose(Matrix3d &relative_R, Vector3d &relative_T, int &l)
             double average_parallax;
             for (int j = 0; j < int(corres.size()); j++)
             {
-                Vector2d pts_0(corres[j].first(0), corres[j].first(1));
+                Vector2d pts_0(corres[j].first(0), corres[j].first(1));  // 取出归一化坐标的（x, y）
                 Vector2d pts_1(corres[j].second(0), corres[j].second(1));
-                double parallax = (pts_0 - pts_1).norm();  // 计算了视差
+                double parallax = (pts_0 - pts_1).norm();  // 计算视差.norm()返回向量的二范数（每个元素的平方和开根号）
                 sum_parallax = sum_parallax + parallax;
 
             }
             average_parallax = 1.0 * sum_parallax / int(corres.size());  // 计算每个特征点的平均视差
-            // 有足够的视差在通过本质矩阵恢复第i帧和最后一帧之间的 R t T_i_last
+            // 有足够的视差,再通过本质矩阵恢复第i帧和最后一帧之间的 R t
             if(average_parallax * 460 > 30 && m_estimator.solveRelativeRT(corres, relative_R, relative_T)) // 判断是否满足初始化条件：视差>30
-            {  // solveRelativeRT()通过基础矩阵计算当前帧与第l帧之间的R和T,并判断内点数目是否足够
+            {   // solveRelativeRT()通过基础矩阵计算最新帧到第l帧的RT（本来是第l帧到最新帧，但是函数最后对矩阵取反）,并判断内点数目是否足够
                 // 一旦这一帧与当前帧视差足够大了，那么就不再继续找下去了(再找只会和当前帧的视差越来越小）
                 l = i;
                 ROS_DEBUG("average_parallax %f choose l %d and newest frame to triangulate the whole structure", average_parallax * 460, l);

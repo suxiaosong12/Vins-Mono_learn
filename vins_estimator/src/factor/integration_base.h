@@ -208,12 +208,9 @@ class IntegrationBase
     double sum_dt; // 这一段预积分的总时间间隔
 
     // delta_p、delta_q和delta_v是标称状态的预积分
-    // delta_p表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的位置
-    // delta_q表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的旋转
-    // delta_v表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的速度
-    Eigen::Vector3d delta_p;
-    Eigen::Quaterniond delta_q;
-    Eigen::Vector3d delta_v;
+    Eigen::Vector3d delta_p;  // delta_p表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的位置
+    Eigen::Quaterniond delta_q;  // delta_q表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的旋转
+    Eigen::Vector3d delta_v;  // delta_v表示该段预积分初始时刻本体坐标系下，当前时刻本体坐标系的速度
 
     // 该段预积分所使用的IMU数据的缓存vector
     // 这3个缓存的作用是：当bias变换过大时，需要使用这些数据重新进行预积分
