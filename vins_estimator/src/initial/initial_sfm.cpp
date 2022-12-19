@@ -10,8 +10,8 @@ void GlobalSFM::triangulatePoint(Eigen::Matrix<double, 3, 4> &Pose0, Eigen::Matr
 	Matrix4d design_matrix = Matrix4d::Zero();
 	//|-r1 + v * r2| 
 	//| r0 - u * r2|* X = 0, 一个归一化平面坐标x和变换矩阵可以构建两个关于X的线性方程组
-	design_matrix.row(0) = point0[0] * Pose0.row(2) - Pose0.row(0);
-	design_matrix.row(1) = point0[1] * Pose0.row(2) - Pose0.row(1);
+	design_matrix.row(0) = point0[0] * Pose0.row(2) - Pose0.row(0);  // u*r2-r0
+	design_matrix.row(1) = point0[1] * Pose0.row(2) - Pose0.row(1);  // v*r2-r1
 	design_matrix.row(2) = point1[0] * Pose1.row(2) - Pose1.row(0);
 	design_matrix.row(3) = point1[1] * Pose1.row(2) - Pose1.row(1);
 	Vector4d triangulated_point;
@@ -33,6 +33,7 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 		if (sfm_f[j].state != true) // 如果该特征点未被三角化，则跳过该特征点
 			continue;
 		Vector2d point2d;
+		// 找出代求帧上所有特征点的归一化坐标和3D坐标（l系上）
 		for (int k = 0; k < (int)sfm_f[j].observation.size(); k++) // 遍历观测到该特征点的图像帧
 		{
 			if (sfm_f[j].observation[k].first == i) // 从observation中找到待解算位姿的帧i
@@ -62,7 +63,7 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 	cv::eigen2cv(P_initial, t);
 	cv::Mat K = (cv::Mat_<double>(3, 3) << 1, 0, 0, 0, 1, 0, 0, 0, 1); // 似乎是因为2D点使用了归一化平面上的坐标，所以相机内参矩阵设置为单位阵
 	bool pnp_succ;
-	pnp_succ = cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1);
+	pnp_succ = cv::solvePnP(pts_3_vector, pts_2_vector, K, D, rvec, t, 1);  // 得到了第l帧到第i帧的旋转平移
 	if(!pnp_succ)
 	{
 		return false;
@@ -139,7 +140,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 
 	// have relative_r relative_t
 	// intial two view
-	// 把relativePose()找到的第l帧（l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置，最后一帧的pose为relative_R,relative_T
+	// 把relativePose()找到的第l帧（l是在滑动窗口中找到的与最新帧做5点法的帧的帧号）作为初始位置
 	// 第l帧的姿态设置为一个没有任何旋转的实单位四元数
 	// 枢纽帧设置为单位帧，也可以理解为世界系原点
 	q[l].w() = 1;
@@ -150,8 +151,9 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	// 第l帧位置向量设置为[0, 0, 0],作为参考帧
 	T[l].setZero();
 
-	// 滑动窗口中最新帧相对于第l帧的旋转和位移，旋转增量右乘
-	q[frame_num - 1] = q[l] * Quaterniond(relative_R);
+	// 这里把第l帧看作参考坐标系，根据当前帧相对于第l帧的relative_R，relative_T，
+	// 得到当前帧在参考坐标系下的位姿，之后的pose[i]表示第l帧相对于第i帧的变换矩阵[R|T]
+	q[frame_num - 1] = q[l] * Quaterniond(relative_R); // relative_R表示最新帧相对于l帧的旋转矩阵Rln,(Xl = Rln * Xn)
 	T[frame_num - 1] = relative_T;
 	//cout << "init q_l " << q[l].w() << " " << q[l].vec().transpose() << endl;
 	//cout << "init t_l " << T[l].transpose() << endl;
@@ -167,7 +169,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	double c_rotation[frame_num][4];
 	double c_translation[frame_num][3];
 
-	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中各帧相对于l的变换矩阵[R t]
+	Eigen::Matrix<double, 3, 4> Pose[frame_num]; // 滑动窗口中第l帧相对于第i帧的变换矩阵[R t]
 
 	// 之所以在这两个地方要保存这种相反的旋转，是因为三角化求深度的时候需要这个相反旋转的矩阵
 	// 第l帧
@@ -200,12 +202,13 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 	for (int i = l; i < frame_num - 1 ; i++)
 	{
 		// solve pnp
-		// pnp求解位姿
+		// 先调用下面的triangulateTwoFrames()三角化第l帧和当前帧，
+		// 再pnp求解，再三角化求解第i帧和当前帧，循环求解l + 1到frame_num - 1所有帧
 		if (i > l)
 		{
 			// 这是依次求解，因此上一帧的位姿是已知量
 			Matrix3d R_initial = c_Rotation[i - 1];
-			Vector3d P_initial = c_Translation[i - 1];
+			Vector3d P_initial = c_Translation[i - 1];  // 已知第i帧上出现的一些特征点在l系的空间坐标，通过上一帧的旋转平移得到下一帧的旋转平移
 			if(!solveFrameByPnP(R_initial, P_initial, i, sfm_f))
 				return false;
 			c_Rotation[i] = R_initial;
@@ -217,7 +220,7 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 
 		// triangulate point based on the solve pnp result
 		// 遍历l帧到第（frame_num - 2）帧，寻找与第（frame_num - 1）帧的匹配，三角化特征点
-		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);  // 当前帧和最后一帧进行三角化处理
+		triangulateTwoFrames(i, Pose[i], frame_num - 1, Pose[frame_num - 1], sfm_f);  // 第i帧和当前帧进行三角化处理
 	}
 
 

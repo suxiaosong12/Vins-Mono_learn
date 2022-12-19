@@ -335,7 +335,7 @@ bool Estimator::initialStructure()
               sfm_f, sfm_tracked_points))
     {
         ROS_DEBUG("global SFM failed!");
-        marginalization_flag = MARGIN_OLD;
+        marginalization_flag = MARGIN_OLD;  // 在初始化后期的第一次slidingwindow() marg掉的是old帧
         return false;
     }
 
