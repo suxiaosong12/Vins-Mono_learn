@@ -348,11 +348,11 @@ bool Estimator::initialStructure()
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
-    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)  // i代表跟这个帧最近的KF的索引
+    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)  // 遍历所有的图像帧，i代表跟这个帧最近的KF的索引
     {
         // provide initial guess
         cv::Mat r, rvec, t, D, tmp_r;
-        // 这一帧本身就是KF，因此可以直接得到位姿
+        // 对于滑窗内的帧，把它们设为关键帧，并获得它们对应的IMU坐标系到l系的旋转平移
         if((frame_it->first) == Headers[i].stamp.toSec()) // all_image_frame与滑动窗口中对应的帧
         {
             frame_it->second.is_key_frame = true; // 滑动窗口中所有帧都是关键帧

@@ -71,7 +71,7 @@ bool GlobalSFM::solveFrameByPnP(Matrix3d &R_initial, Vector3d &P_initial, int i,
 	cv::Rodrigues(rvec, r); // 旋转向量转为旋转矩阵
 	//cout << "r " << endl << r << endl;
 	MatrixXd R_pnp;
-	cv::cv2eigen(r, R_pnp);
+	cv::cv2eigen(r, R_pnp);  //转换为原有格式
 	MatrixXd T_pnp;
 	cv::cv2eigen(t, T_pnp);
 	R_initial = R_pnp; // 输出旋转矩阵
@@ -313,10 +313,9 @@ bool GlobalSFM::construct(int frame_num, Quaterniond* q, Vector3d* T, int l,
 		c_rotation[i][1] = c_Quat[i].x();
 		c_rotation[i][2] = c_Quat[i].y();
 		c_rotation[i][3] = c_Quat[i].z();
-		problem.AddParameterBlock(c_rotation[i], 4, local_parameterization);
+		problem.AddParameterBlock(c_rotation[i], 4, local_parameterization);  // 在这里，可以发现，仅仅是位姿被优化了，特征点的3D坐标没有被优化
 		problem.AddParameterBlock(c_translation[i], 3);
-		// 由于是单目视觉slam，有七个自由度不可观，因此，fix一些参数块避免在零空间漂移
-		// fix设置的世界坐标系第l帧的位姿，同时fix最后一帧的位移用来fix尺度
+		// l帧是参考系，最新帧的平移也是先验，如果不固定住，原本可观的量会变的不可观
 		if (i == l)
 		{
 			problem.SetParameterBlockConstant(c_rotation[i]);  // SetParameterBlockConstant()函数是设置参数块为常数，不被优化
