@@ -340,38 +340,39 @@ bool Estimator::initialStructure()
     }
 
     // solve pnp for all frame
-    // 只是针对KF进行sfm，初始化需要all_image_frame中的所有元素，因此下面通过KF来求解其他的非KF的位姿
-    // 由于并不是第一次视觉初始化就能成功，此时图像帧数目有可能会超过滑动窗口的大小
-    // 所以再视觉初始化的最后，要求出滑动窗口外的帧的位姿
-    // 最后把世界坐标系从帧l的相机坐标系，转到帧l的IMU坐标系
+
     // 4.对于非滑动窗口的所有帧，提供一个初始的R,T，然后solve pnp求解pose
     map<double, ImageFrame>::iterator frame_it;
     map<int, Vector3d>::iterator it;
     frame_it = all_image_frame.begin( );
-    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)  // 遍历所有的图像帧，i代表跟这个帧最近的KF的索引
+    for (int i = 0; frame_it != all_image_frame.end( ); frame_it++)  // 遍历所有的图像帧
     {
         // provide initial guess
         cv::Mat r, rvec, t, D, tmp_r;
         // 对于滑窗内的帧，把它们设为关键帧，并获得它们对应的IMU坐标系到l系的旋转平移
-        if((frame_it->first) == Headers[i].stamp.toSec()) // all_image_frame与滑动窗口中对应的帧
+        // Headers，Q和T，它们的size都是WINDOW_SIZE+1，它们存储的信息都是滑窗内的
+        if((frame_it->first) == Headers[i].stamp.toSec())  // 通过时间戳判断是不是滑窗内的帧
         {
-            frame_it->second.is_key_frame = true; // 滑动窗口中所有帧都是关键帧
+            frame_it->second.is_key_frame = true;  // 滑动窗口中所有帧都是关键帧
             // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态
-            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose(); // 得到Rwi
-            frame_it->second.T = T[i];  // 初始化不估计平移外参
+            // ImageFrame里不仅包括了图像信息，还包括了对应的IMU的位姿信息和IMU预积分信息，
+            // 而这里，是这些帧第一次获得它们对应的IMU的位姿信息的位置，也就是bk->l帧的旋转平移
+            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();
+            frame_it->second.T = T[i];
             i++;
             continue;
         }
-        if((frame_it->first) > Headers[i].stamp.toSec())
+        if((frame_it->first) > Headers[i].stamp.toSec())  // 边界判断：如果当前帧的时间戳大于滑窗内第i帧的时间戳，那么i++
         {
-            i++;
+            i++;  // 没看明白
         }
 
         // 为滑动窗口外的帧提供一个初始位姿,最近的KF提供一个初始值，Twc -> Tcw
+        // 这里的 Q和 T是图像帧的位姿，而不是求解PNP时所用的坐标系变换矩阵，两者具有对称关系
         Matrix3d R_inital = (Q[i].inverse()).toRotationMatrix();
         Vector3d P_inital = - R_inital * T[i];
         cv::eigen2cv(R_inital, tmp_r);  // eigen -> cv
-        cv::Rodrigues(tmp_r, rvec);
+        cv::Rodrigues(tmp_r, rvec);  // 罗德里格斯公式将旋转矩阵转换成旋转向量
         cv::eigen2cv(P_inital, t);
 
         frame_it->second.is_key_frame = false; // 初始化时位于滑动窗口外的帧是非关键帧
@@ -423,7 +424,7 @@ bool Estimator::initialStructure()
         // Twc -> Twi
         // 由于尺度未恢复，因此平移暂时不转到imu系
         frame_it->second.R = R_pnp * RIC[0].transpose(); // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态。
-        frame_it->second.T = T_pnp; 
+        frame_it->second.T = T_pnp;  // 传入的是bk->l的旋转平移
     }
 
     //camera与IMU对齐
@@ -452,6 +453,7 @@ bool Estimator::visualInitialAlign()
     }
 
     // change state
+    // 传递所有图像帧的位姿Ps、Rs,并将其设置为关键帧
     for (int i = 0; i <= frame_count; i++)
     {
         // 滑动窗口中各图像帧在世界坐标系下的旋转和平移
@@ -459,15 +461,16 @@ bool Estimator::visualInitialAlign()
         Vector3d Pi = all_image_frame[Headers[i].stamp.toSec()].T;
         Ps[i] = Pi;
         Rs[i] = Ri;
-        all_image_frame[Headers[i].stamp.toSec()].is_key_frame = true; // 滑动窗口中所有初始帧都是关键帧
+        all_image_frame[Headers[i].stamp.toSec()].is_key_frame = true;
     }
 
     VectorXd dep = f_manager.getDepthVector();
     for (int i = 0; i < dep.size(); i++)
-        dep[i] = -1;
+        dep[i] = -1;  // 将所有特征点的深度置为-1
     f_manager.clearDepth(dep);
 
     //triangulat on cam pose , no tic
+    // 重新计算特征点的深度
     Vector3d TIC_TMP[NUM_OF_CAM];
     for(int i = 0; i < NUM_OF_CAM; i++)
         TIC_TMP[i].setZero();
@@ -478,8 +481,10 @@ bool Estimator::visualInitialAlign()
     double s = (x.tail<1>())(0);
     for (int i = 0; i <= WINDOW_SIZE; i++)
     {
-        pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);
+        pre_integrations[i]->repropagate(Vector3d::Zero(), Bgs[i]);  // IMU的bias改变，重新计算滑窗内的预积分
     }
+
+    // 将Ps、Vs、depth尺度s缩放后从l帧转变为相对于c0帧图像坐标系下
     for (int i = frame_count; i >= 0; i--)
         Ps[i] = s * Ps[i] - Rs[i] * TIC[0] - (s * Ps[0] - Rs[0] * TIC[0]);
     int kv = -1;
@@ -500,12 +505,15 @@ bool Estimator::visualInitialAlign()
         it_per_id.estimated_depth *= s;
     }
 
+    // 通过将重力旋转到z轴上，得到世界坐标系与摄像机坐标系c0之间的旋转矩阵rot_diff
     Matrix3d R0 = Utility::g2R(g); // 当前参考坐标系与世界坐标系（依靠g构建的坐标系）的旋转矩阵，暂时每搞清楚从谁转到谁？？？
     double yaw = Utility::R2ypr(R0 * Rs[0]).x();
     R0 = Utility::ypr2R(Eigen::Vector3d{-yaw, 0, 0}) * R0;
     g = R0 * g;
     //Matrix3d rot_diff = R0 * Rs[0].transpose();
     Matrix3d rot_diff = R0;
+
+    // 所有变量从参考坐标系c0旋转到世界坐标系w
     for (int i = 0; i <= frame_count; i++)
     {
         // 似乎是把Ps、Rs、Vs转到世界坐标系下

@@ -10,7 +10,7 @@
 using namespace Eigen;
 using namespace std;
 
-// 用于融合IMU和视觉信息的数据结构，包括了某一帧的全部信息:位姿，特征点信息，预积分信息，是否是关键帧等
+// 用于融合IMU和视觉信息的数据结构，包括了某一帧的全部信息:位姿，特征点信息，IMU位姿信息，IMU预积分信息，是否是关键帧
 class ImageFrame
 {
     public:
