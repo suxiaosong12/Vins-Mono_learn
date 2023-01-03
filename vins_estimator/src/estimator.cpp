@@ -357,7 +357,7 @@ bool Estimator::initialStructure()
             // 根据各帧相机坐标系的姿态和外参，得到用各帧IMU坐标系的姿态
             // ImageFrame里不仅包括了图像信息，还包括了对应的IMU的位姿信息和IMU预积分信息，
             // 而这里，是这些帧第一次获得它们对应的IMU的位姿信息的位置，也就是bk->l帧的旋转平移
-            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();
+            frame_it->second.R = Q[i].toRotationMatrix() * RIC[0].transpose();  // 这里对应论文公式(14)
             frame_it->second.T = T[i];
             i++;
             continue;

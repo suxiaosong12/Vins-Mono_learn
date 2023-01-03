@@ -19,20 +19,20 @@ void solveGyroscopeBias(map<double, ImageFrame> &all_image_frame, Vector3d* Bgs)
         tmp_A.setZero();
         VectorXd tmp_b(3);
         tmp_b.setZero();
-        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);
-        tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);
-        tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();
+        Eigen::Quaterniond q_ij(frame_i->second.R.transpose() * frame_j->second.R);  // q_ij = qc0_bk.transpose() * qc0_bk+1
+        tmp_A = frame_j->second.pre_integration->jacobian.template block<3, 3>(O_R, O_BG);  // tmp_A = Jy_bw
+        tmp_b = 2 * (frame_j->second.pre_integration->delta_q.inverse() * q_ij).vec();  // tmp_b = 2 * (ybk_bk+1.inverse() * q_ij)
         A += tmp_A.transpose() * tmp_A;
-        b += tmp_A.transpose() * tmp_b;
+        b += tmp_A.transpose() * tmp_b;  // 转为正定矩阵，然后用ldlt分解
 
     }
-    delta_bg = A.ldlt().solve(b);  // 采用LDLT分解，求解Ax = b
+    delta_bg = A.ldlt().solve(b);  // 采用LDLT分解，求解delta_bg
     ROS_WARN_STREAM("gyroscope bias initial calibration " << delta_bg.transpose());
 
-    for (int i = 0; i <= WINDOW_SIZE; i++)  // 因为求得的delta_bg是变化量，所以需要在滑窗内累加得到偏移准确值
+    for (int i = 0; i <= WINDOW_SIZE; i++)  // 因为求得的delta_bg只是Bias的变化量，所以需要在滑窗内累加得到Bias的准确值
         Bgs[i] += delta_bg;
 
-    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)  // 重新计算所有帧的IMU积分
+    for (frame_i = all_image_frame.begin(); next(frame_i) != all_image_frame.end( ); frame_i++)  // 利用新的Bias重新计算所有帧的IMU积分
     {
         frame_j = next(frame_i);
         frame_j->second.pre_integration->repropagate(Vector3d::Zero(), Bgs[0]);
@@ -181,19 +181,19 @@ bool LinearAlignment(map<double, ImageFrame> &all_image_frame, Vector3d &g, Vect
         MatrixXd r_A = tmp_A.transpose() * cov_inv * tmp_A;
         VectorXd r_b = tmp_A.transpose() * cov_inv * tmp_b;
 
-        A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();
-        b.segment<6>(i * 3) += r_b.head<6>();
+        A.block<6, 6>(i * 3, i * 3) += r_A.topLeftCorner<6, 6>();  // 因为r_A的后3行列为0，所以这么加，又因为前面all_frame_count * 3这是速度的维度
+        b.segment<6>(i * 3) += r_b.head<6>();  // b的行数要等于A的，所以这里k=0到n的速度求解时，A和b的矩阵块都要填上
 
-        A.bottomRightCorner<4, 4>() += r_A.bottomRightCorner<4, 4>();
+        A.bottomRightCorner<4, 4>() += r_A.bottomRightCorner<4, 4>();  // 求解s的矩阵块
         b.tail<4>() += r_b.tail<4>();
 
-        A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();
+        A.block<6, 4>(i * 3, n_state - 4) += r_A.topRightCorner<6, 4>();  // 求解g的矩阵块
         A.block<4, 6>(n_state - 4, i * 3) += r_A.bottomLeftCorner<4, 6>();
     }
     A = A * 1000.0;
     b = b * 1000.0;
     x = A.ldlt().solve(b);  // ldlt分解把x偏大的100矫正
-    double s = x(n_state - 1) / 100.0;
+    double s = x(n_state - 1) / 100.0;  // x(n_state - 1)  指的是x向量的最后一个值的意思
     ROS_DEBUG("estimated scale: %f", s);
     g = x.segment<3>(n_state - 4);
     ROS_DEBUG_STREAM(" result g     " << g.norm() << " " << g.transpose());

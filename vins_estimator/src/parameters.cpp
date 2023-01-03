@@ -5,7 +5,7 @@ double MIN_PARALLAX;
 double ACC_N, ACC_W;
 double GYR_N, GYR_W;
 
-std::vector<Eigen::Matrix3d> RIC;
+std::vector<Eigen::Matrix3d> RIC;  // 即Rbc，旋转外参
 std::vector<Eigen::Vector3d> TIC;
 
 Eigen::Vector3d G{0.0, 0.0, 9.8};
